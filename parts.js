@@ -1,7 +1,7 @@
 window.PARTS_CATALOG = (() => {
   const GRID = 20; // 2.54mm ピッチ = 20px
 
-  // ローカル座標 → 回転＋左右反転（SVGの rotate(rot) scale(flipX?-1:1, 1) と完全一致）
+  // ローカル座標 → 回転＋左右反転（SVGの rotate(rot) scale(flipX?-1:1, 1) と一致）
   function transformGrid(lx, ly, rot, flipX = false) {
     const fx = flipX ? -lx : lx;
     const r = ((rot % 360) + 360) % 360;
@@ -14,6 +14,12 @@ window.PARTS_CATALOG = (() => {
   // 反転時に文字が鏡文字にならないよう打ち消すtransform属性
   function unflipAttr(cx, cy, flipX) {
     return flipX ? `transform="translate(${cx}, ${cy}) scale(-1, 1) translate(${-cx}, ${-cy})"` : "";
+  }
+
+  // 回転時に文字を常に正立（水平）に保つtransform属性
+  function unrotateAttr(cx, cy, rot) {
+    const r = ((rot % 360) + 360) % 360;
+    return r !== 0 ? `transform="rotate(${-r}, ${cx}, ${cy})"` : "";
   }
 
   // Raspberry Pi Pico / Pico 2 W（全40ピン）
@@ -65,19 +71,11 @@ window.PARTS_CATALOG = (() => {
 
   // 抵抗カラーコード（数字0〜9・乗数）
   const BAND_DIGIT_COLORS = [
-    "#111827", // 0 黒
-    "#92400e", // 1 茶
-    "#dc2626", // 2 赤
-    "#f97316", // 3 橙
-    "#eab308", // 4 黄
-    "#16a34a", // 5 緑
-    "#2563eb", // 6 青
-    "#9333ea", // 7 紫
-    "#64748b", // 8 灰
-    "#f8fafc"  // 9 白
+    "#111827", "#92400e", "#dc2626", "#f97316", "#eab308",
+    "#16a34a", "#2563eb", "#9333ea", "#64748b", "#f8fafc"
   ];
 
-  // 任意の抵抗値文字列（例: "220", "4.7k", "10kΩ", "1M"）からラベルと4本帯カラーコードを計算
+  // 任意の抵抗値文字列からラベルと4本帯カラーコードを計算
   function parseResistance(raw) {
     const str = String(raw || "220")
       .replace(/[０-９．ａ-ｚＡ-Ｚ]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
@@ -99,19 +97,17 @@ window.PARTS_CATALOG = (() => {
     else if (unit === "m") num *= 1e6;
     else if (unit === "g") num *= 1e9;
 
-    // きれいな表示ラベルを生成
     let label = "";
     if (num >= 1e6) label = `${+(num / 1e6).toFixed(2)}MΩ`;
     else if (num >= 1e3) label = `${+(num / 1e3).toFixed(2)}kΩ`;
     else label = `${+num.toFixed(2)}Ω`;
 
-    // 4本帯（第1数字・第2数字・乗数・金±5%）
     if (num <= 0) {
       return { label: "0Ω", bands: ["#111827", "#111827", "#111827", "#eab308"], valid: true };
     }
 
     const exp = Math.floor(Math.log10(num));
-    const sig = Math.round(num / Math.pow(10, exp - 1)); // 2桁の有効数字 (10..99)
+    const sig = Math.round(num / Math.pow(10, exp - 1));
     let d1 = Math.floor(sig / 10);
     let d2 = sig % 10;
     let multExp = exp - 1;
@@ -123,8 +119,8 @@ window.PARTS_CATALOG = (() => {
 
     let multColor = "#111827";
     if (multExp >= 0 && multExp <= 9) multColor = BAND_DIGIT_COLORS[multExp];
-    else if (multExp === -1) multColor = "#eab308"; // 金 ×0.1
-    else if (multExp === -2) multColor = "#cbd5e1"; // 銀 ×0.01
+    else if (multExp === -1) multColor = "#eab308";
+    else if (multExp === -2) multColor = "#cbd5e1";
 
     return {
       label,
@@ -132,7 +128,7 @@ window.PARTS_CATALOG = (() => {
         BAND_DIGIT_COLORS[Math.max(0, Math.min(9, d1))],
         BAND_DIGIT_COLORS[Math.max(0, Math.min(9, d2))],
         multColor,
-        "#eab308" // 金（±5%）
+        "#eab308"
       ],
       valid: true
     };
@@ -179,7 +175,7 @@ window.PARTS_CATALOG = (() => {
     }
   };
 
-  // 7セグメント点灯マップ (a,b,c,d,e,f,g)
+  // 7セグメント点灯マップ
   const SEVEN_SEG_DIGITS = {
     off: [],
     "0": ["a","b","c","d","e","f"],
@@ -276,8 +272,8 @@ window.PARTS_CATALOG = (() => {
     } else if (part.type === "buzzer") {
       const span = part.props?.span || 3;
       locals = [
-        { name: "+", gx: 0, gy: 0 },
-        { name: "-", gx: span, gy: 0 }
+        { name: "端子1", gx: 0, gy: 0 },
+        { name: "端子2", gx: span, gy: 0 }
       ];
     } else if (part.type === "matrix_1088bs") {
       for (let i = 0; i < 8; i++) {
@@ -309,8 +305,10 @@ window.PARTS_CATALOG = (() => {
 
   // ==================== 各部品のSVG描画 ====================
 
+  // ブレッドボード（回転時にも数字・文字が正立で読みやすい）
   function renderBreadboard(part, isSelected) {
     const G = GRID;
+    const rot = part.rot || 0;
     const x0 = -1.2 * G;
     const y0 = -4.0 * G;
     const width = 31.4 * G;
@@ -334,23 +332,43 @@ window.PARTS_CATALOG = (() => {
       }
     }
 
+    // 行番号 (1..30) — 縦置きでも正立表示
     let colNums = "";
     for (let col = 0; col < 30; col++) {
       const num = col + 1;
-      const bold = (num === 1 || num % 5 === 0) ? "700" : "400";
-      const fill = (num === 1 || num % 5 === 0) ? "#334155" : "#94a3b8";
-      colNums += `<text x="${col * G}" y="${-0.85 * G}" text-anchor="middle" font-size="9" font-weight="${bold}" fill="${fill}">${num}</text>`;
-      colNums += `<text x="${col * G}" y="${12.25 * G}" text-anchor="middle" font-size="9" font-weight="${bold}" fill="${fill}">${num}</text>`;
+      const bold = (num === 1 || num % 5 === 0) ? "700" : "500";
+      const fill = (num === 1 || num % 5 === 0) ? "#1e293b" : "#94a3b8";
+      const x = col * G;
+      const y1 = -0.95 * G;
+      const y2 = 11.95 * G;
+      colNums += `<text x="${x}" y="${y1}" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="${bold}" fill="${fill}" ${unrotateAttr(x, y1, rot)}>${num}</text>`;
+      colNums += `<text x="${x}" y="${y2}" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="${bold}" fill="${fill}" ${unrotateAttr(x, y2, rot)}>${num}</text>`;
     }
 
+    // 列記号 (a..j) — 縦置きでも正立表示
     const rowLabels = [
       ["a", 0], ["b", 1], ["c", 2], ["d", 3], ["e", 4],
       ["f", 7], ["g", 8], ["h", 9], ["i", 10], ["j", 11]
     ];
     let rowTexts = "";
     for (const [ch, ly] of rowLabels) {
-      rowTexts += `<text x="${-0.75 * G}" y="${ly * G + 3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="#475569">${ch}</text>`;
-      rowTexts += `<text x="${29.75 * G}" y="${ly * G + 3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="#475569">${ch}</text>`;
+      const y = ly * G;
+      const x1 = -0.75 * G;
+      const x2 = 29.75 * G;
+      rowTexts += `<text x="${x1}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="700" fill="#475569" ${unrotateAttr(x1, y, rot)}>${ch}</text>`;
+      rowTexts += `<text x="${x2}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="700" fill="#475569" ${unrotateAttr(x2, y, rot)}>${ch}</text>`;
+    }
+
+    // 電源レール記号（+ / -）
+    const railSigns = [
+      [-0.45 * G, -3 * G, "−", "#2563eb"],
+      [-0.45 * G, -2 * G, "＋", "#ef4444"],
+      [-0.45 * G, 13 * G, "＋", "#ef4444"],
+      [-0.45 * G, 14 * G, "−", "#2563eb"]
+    ];
+    let signsSvg = "";
+    for (const [sx, sy, ch, color] of railSigns) {
+      signsSvg += `<text x="${sx}" y="${sy}" text-anchor="middle" dominant-baseline="central" font-size="12" font-weight="800" fill="${color}" ${unrotateAttr(sx, sy, rot)}>${ch}</text>`;
     }
 
     const stroke = isSelected ? "#2563eb" : "#cbd5e1";
@@ -363,18 +381,18 @@ window.PARTS_CATALOG = (() => {
       <line x1="${0.3 * G}" y1="${-1.45 * G}" x2="${29.7 * G}" y2="${-1.45 * G}" stroke="#ef4444" stroke-width="2" />
       <line x1="${0.3 * G}" y1="${12.45 * G}" x2="${29.7 * G}" y2="${12.45 * G}" stroke="#ef4444" stroke-width="2" />
       <line x1="${0.3 * G}" y1="${14.55 * G}" x2="${29.7 * G}" y2="${14.55 * G}" stroke="#2563eb" stroke-width="2" />
-      <text x="${-0.45 * G}" y="${-3 * G + 4}" text-anchor="middle" font-size="13" font-weight="800" fill="#2563eb">−</text>
-      <text x="${-0.45 * G}" y="${-2 * G + 4}" text-anchor="middle" font-size="13" font-weight="800" fill="#ef4444">＋</text>
-      <text x="${-0.45 * G}" y="${13 * G + 4}" text-anchor="middle" font-size="13" font-weight="800" fill="#ef4444">＋</text>
-      <text x="${-0.45 * G}" y="${14 * G + 4}" text-anchor="middle" font-size="13" font-weight="800" fill="#2563eb">−</text>
+      ${signsSvg}
       ${colNums}
       ${rowTexts}
       ${holes}
     `;
   }
 
-  function renderPico(part, isSelected) {
+  // Raspberry Pi Pico / Pico 2 W（縦置き文字正立・透過モード対応・基板内ピン番号印字）
+  function renderPico(part, isSelected, isTransparent = false) {
     const G = GRID;
+    const rot = ((part.rot || 0) % 360 + 360) % 360;
+    const isVertical = rot === 90 || rot === 270;
     const x0 = -0.6 * G;
     const y0 = -0.6 * G;
     const w = 20.2 * G;
@@ -382,36 +400,66 @@ window.PARTS_CATALOG = (() => {
     const modelName = part.props?.model || "Raspberry Pi Pico";
     const chipName = modelName.includes("2") ? "RP2350" : "RP2040";
     const stroke = isSelected ? "#facc15" : "#065f46";
-    const strokeW = isSelected ? 3 : 1.5;
+    const strokeW = isSelected ? 3 : 1.6;
+    const pcbFillOpacity = isTransparent ? 0.36 : 1.0;
+    const subOpacity = isTransparent ? 0.55 : 1.0;
 
     let pinsSvg = "";
     for (const p of PICO_PINS) {
       const cx = p.gx * G;
       const cy = p.gy * G;
+      // 基板内側の小さな物理ピン番号（1..40）
+      const numY = p.side === "top" ? cy + 13 : cy - 13;
+      const numColor = isTransparent ? "#0f172a" : "#ccfbf1";
       pinsSvg += `
         <circle cx="${cx}" cy="${cy}" r="6.5" fill="#eab308" stroke="#ca8a04" stroke-width="1" />
         <rect x="${cx - 3}" y="${cy - 3}" width="6" height="6" rx="1" fill="#334155" />
         <circle cx="${cx}" cy="${cy}" r="1.5" fill="#e2e8f0" />
+        <text x="${cx}" y="${numY}" text-anchor="middle" dominant-baseline="central" font-size="7.5" font-weight="700" fill="${numColor}" ${unrotateAttr(cx, numY, rot)}>${p.num}</text>
       `;
     }
 
+    const usbCx = x0 + 5;
+    const usbCy = 3.5 * G;
+    const chipCx = 9.5 * G;
+    const chipCy = 3.5 * G;
+    const logoCx = 14.8 * G;
+    const logoCy = 3.5 * G;
+
+    // 縦置きと横置きでロゴを読みやすくレイアウト
+    const logoText = isVertical
+      ? `<g ${unrotateAttr(logoCx, logoCy, rot)}>
+           <text x="${logoCx}" y="${logoCy - 7}" text-anchor="middle" dominant-baseline="central" font-size="10.5" font-weight="800" fill="${isTransparent ? '#064e3b' : '#ffffff'}">Raspberry Pi</text>
+           <text x="${logoCx}" y="${logoCy + 7}" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="800" fill="${isTransparent ? '#064e3b' : '#ffffff'}">${modelName.replace('Raspberry Pi ', '')}</text>
+         </g>`
+      : `<g ${unrotateAttr(logoCx, logoCy, rot)}>
+           <text x="${logoCx}" y="${logoCy - 5}" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="800" fill="${isTransparent ? '#064e3b' : '#ffffff'}">${modelName}</text>
+           <text x="${logoCx}" y="${logoCy + 10}" text-anchor="middle" dominant-baseline="central" font-size="8" fill="${isTransparent ? '#0f766e' : '#99f6e4'}">Pin 1 〜 Pin 40</text>
+         </g>`;
+
     return `
-      <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="5" fill="#0f766e" stroke="${stroke}" stroke-width="${strokeW}" />
-      <rect x="${x0 - 8}" y="${2.4 * G}" width="26" height="${2.2 * G}" rx="3" fill="#cbd5e1" stroke="#64748b" stroke-width="1.5" />
-      <text x="${x0 + 5}" y="${3.65 * G}" text-anchor="middle" font-size="8" font-weight="700" fill="#334155">USB</text>
-      <rect x="${2.8 * G}" y="${2.5 * G}" width="26" height="18" rx="3" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.2" />
-      <text x="${2.8 * G + 13}" y="${2.5 * G + 28}" text-anchor="middle" font-size="7.5" fill="#ccfbf1">BOOTSEL</text>
-      <rect x="${2.0 * G}" y="${1.1 * G}" width="10" height="7" rx="1.5" fill="#86efac" stroke="#15803d" stroke-width="0.8" />
-      <rect x="${8.2 * G}" y="${2.2 * G}" width="${2.6 * G}" height="${2.6 * G}" rx="3" fill="#1e293b" stroke="#475569" stroke-width="1.2" />
-      <text x="${9.5 * G}" y="${3.65 * G}" text-anchor="middle" font-size="8.5" font-weight="700" fill="#e2e8f0">${chipName}</text>
-      <text x="${14.8 * G}" y="${3.4 * G}" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">${modelName}</text>
-      <text x="${14.8 * G}" y="${4.3 * G}" text-anchor="middle" font-size="8.5" fill="#99f6e4">Pin 1 (左下) 〜 Pin 40 (左上)</text>
-      <polygon points="${0},${6.1 * G} ${-4},${6.5 * G} ${4},${6.5 * G}" fill="#fde047" />
+      <!-- PCB基板本体（透過モード時はここだけ半透明にして下の穴を見せる） -->
+      <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="5" fill="#0f766e" fill-opacity="${pcbFillOpacity}" stroke="${stroke}" stroke-width="${strokeW}" />
+      <!-- USB端子 -->
+      <rect x="${x0 - 8}" y="${2.4 * G}" width="26" height="${2.2 * G}" rx="3" fill="#cbd5e1" fill-opacity="${subOpacity}" stroke="#64748b" stroke-width="1.5" />
+      <text x="${usbCx}" y="${usbCy}" text-anchor="middle" dominant-baseline="central" font-size="8" font-weight="700" fill="#334155" ${unrotateAttr(usbCx, usbCy, rot)}>USB</text>
+      <!-- BOOTSELボタン -->
+      <rect x="${2.8 * G}" y="${2.5 * G}" width="26" height="18" rx="3" fill="#f8fafc" fill-opacity="${subOpacity}" stroke="#94a3b8" stroke-width="1.2" />
+      <!-- オンボードLED -->
+      <rect x="${2.0 * G}" y="${1.3 * G}" width="10" height="7" rx="1.5" fill="#86efac" fill-opacity="${subOpacity}" stroke="#15803d" stroke-width="0.8" />
+      <!-- RP2040 / RP2350 チップ -->
+      <rect x="${8.2 * G}" y="${2.2 * G}" width="${2.6 * G}" height="${2.6 * G}" rx="3" fill="#1e293b" fill-opacity="${subOpacity}" stroke="#475569" stroke-width="1.2" />
+      <text x="${chipCx}" y="${chipCy}" text-anchor="middle" dominant-baseline="central" font-size="8.5" font-weight="700" fill="#e2e8f0" ${unrotateAttr(chipCx, chipCy, rot)}>${chipName}</text>
+      <!-- 基板ロゴ -->
+      ${logoText}
+      <!-- Pin 1 目印三角 -->
+      <polygon points="${0},${5.95 * G} ${-4},${6.35 * G} ${4},${6.35 * G}" fill="#fde047" stroke="#854d0e" stroke-width="0.6" />
       ${pinsSvg}
     `;
   }
 
-  function renderPicoLabels(part, mode, usedPinKeys) {
+  // Picoのピンラベル（直刺し時はブレッドボードの穴を隠さないよう外側へ自動退避）
+  function renderPicoLabels(part, mode, usedPinKeys, isMountedOnBoard = false) {
     if (mode === "none") return "";
     const G = GRID;
     const worldPins = getPartPinsWorld(part);
@@ -429,44 +477,51 @@ window.PARTS_CATALOG = (() => {
       const py = p.worldGy * G;
 
       if (mode === "used") {
-        const dist = 30;
+        // ブレッドボード直刺し時は、ボードの左右外（電源レールの外）まで引き出し線を伸ばす
+        const dist = isMountedOnBoard ? 138 : 30;
         const lx = px + dir.gx * dist;
         const ly = py + dir.gy * dist;
         const text = `${p.num} ${p.label}`;
-        const boxW = Math.max(54, text.length * 7.5 + 14);
+        const boxW = Math.max(58, text.length * 7.5 + 14);
         const boxH = 22;
         const bx = dir.gx > 0 ? lx : (dir.gx < 0 ? lx - boxW : lx - boxW / 2);
         const by = dir.gy > 0 ? ly : (dir.gy < 0 ? ly - boxH : ly - boxH / 2);
+        const dash = isMountedOnBoard ? `stroke-dasharray="4 3"` : "";
 
         html += `
           <g class="pico-pin-badge">
             <circle cx="${px}" cy="${py}" r="8" fill="none" stroke="${color}" stroke-width="2.5" />
-            <line x1="${px + dir.gx * 8}" y1="${py + dir.gy * 8}" x2="${lx}" y2="${ly}" stroke="${color}" stroke-width="2" />
+            <line x1="${px + dir.gx * 8}" y1="${py + dir.gy * 8}" x2="${lx}" y2="${ly}" stroke="${color}" stroke-width="2" ${dash} />
             <rect x="${bx}" y="${by}" width="${boxW}" height="${boxH}" rx="11" fill="${color}" stroke="#ffffff" stroke-width="2" />
-            <text x="${bx + boxW / 2}" y="${by + 15}" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">${text}</text>
+            <text x="${bx + boxW / 2}" y="${by + 11.5}" text-anchor="middle" dominant-baseline="central" font-size="11" font-weight="700" fill="#ffffff">${text}</text>
           </g>
         `;
       } else {
-        const isVerticalPinRow = dir.gy !== 0;
+        // 全ピン表示
+        const isVerticalPinRow = dir.gy !== 0; // 横置きPico（上下にラベル）
         const text = `${p.num}:${p.label}`;
-        const badgeLen = 58;
-        const badgeThick = 15;
-        const offset = 13;
+        const badgeLen = 64;
+        const badgeThick = 16;
+        const offset = isMountedOnBoard ? 134 : 14;
 
         if (isVerticalPinRow) {
-          const cy = dir.gy < 0 ? py - offset - badgeLen / 2 : py + offset + badgeLen / 2;
+          const edgeY = dir.gy < 0 ? py - offset : py + offset;
+          const cy = dir.gy < 0 ? edgeY - badgeLen / 2 : edgeY + badgeLen / 2;
           html += `
+            ${isMountedOnBoard ? `<line x1="${px}" y1="${py + dir.gy * 7}" x2="${px}" y2="${edgeY}" stroke="${color}" stroke-width="1" stroke-dasharray="2 2" opacity="0.65" />` : ""}
             <g transform="translate(${px}, ${cy}) rotate(-90)">
               <rect x="${-badgeLen / 2}" y="${-badgeThick / 2}" width="${badgeLen}" height="${badgeThick}" rx="3" fill="${color}" stroke="${isUsed ? '#facc15' : '#ffffff'}" stroke-width="${isUsed ? 2 : 1}" />
-              <text x="0" y="3.5" text-anchor="middle" font-size="9.5" font-weight="700" fill="#ffffff">${text}</text>
+              <text x="0" y="0.5" text-anchor="middle" dominant-baseline="central" font-size="9.5" font-weight="700" fill="#ffffff">${text}</text>
             </g>
           `;
         } else {
-          const cx = dir.gx < 0 ? px - offset - badgeLen / 2 : px + offset + badgeLen / 2;
+          const edgeX = dir.gx < 0 ? px - offset : px + offset;
+          const cx = dir.gx < 0 ? edgeX - badgeLen / 2 : edgeX + badgeLen / 2;
           html += `
+            ${isMountedOnBoard ? `<line x1="${px + dir.gx * 7}" y1="${py}" x2="${edgeX}" y2="${py}" stroke="${color}" stroke-width="1" stroke-dasharray="2 2" opacity="0.65" />` : ""}
             <g transform="translate(${cx}, ${py})">
               <rect x="${-badgeLen / 2}" y="${-badgeThick / 2}" width="${badgeLen}" height="${badgeThick}" rx="3" fill="${color}" stroke="${isUsed ? '#facc15' : '#ffffff'}" stroke-width="${isUsed ? 2 : 1}" />
-              <text x="0" y="3.5" text-anchor="middle" font-size="9.5" font-weight="700" fill="#ffffff">${text}</text>
+              <text x="0" y="0.5" text-anchor="middle" dominant-baseline="central" font-size="9.5" font-weight="700" fill="#ffffff">${text}</text>
             </g>
           `;
         }
@@ -489,21 +544,16 @@ window.PARTS_CATALOG = (() => {
       ? `<rect x="-16" y="-50" width="${totalW + 32}" height="60" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
       : "";
 
-    // クリックしやすくする透明ヒット領域
     const hitArea = `<rect x="-12" y="-48" width="${totalW + 24}" height="54" fill="transparent" />`;
 
     return `
       ${hitArea}
       ${selRing}
-      <!-- 長い脚（アノード＋：x=0、屈曲を入れて長さを強調） -->
       <path d="M 0,0 L 0,-11 L ${midX - 5},-18 L ${midX - 5},-25" fill="none" stroke="#64748b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-      <!-- 短い脚（カソード−：x=totalW） -->
       <path d="M ${totalW},0 L ${totalW},-16 L ${midX + 5},-18 L ${midX + 5},-25" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-      <!-- LEDドーム本体（中央配置・右端フラットカット） -->
       <path d="M ${midX - 11},-24 L ${midX - 11},-35 A 11.5,11.5 0 0 1 ${midX + 10.5},-35 L ${midX + 10.5},-24 Z" fill="${c.body}" stroke="${c.dark}" stroke-width="1.6" />
       <rect x="${midX - 13}" y="-26" width="25" height="4.5" rx="1.5" fill="${c.body}" stroke="${c.dark}" stroke-width="1.2" />
       <ellipse cx="${midX - 4}" cy="-35" rx="3" ry="5" fill="${c.glow}" opacity="0.85" />
-      <!-- 端子接続点 -->
       <circle cx="0" cy="0" r="3.8" fill="#dc2626" stroke="#ffffff" stroke-width="1" />
       <circle cx="${totalW}" cy="0" r="3.8" fill="#1e293b" stroke="#ffffff" stroke-width="1" />
       ${showPolarity ? `
@@ -565,7 +615,7 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // タクトスイッチ（4本脚・ブレッドボード中央の溝またぎ 2×3マス）
+  // タクトスイッチ（4本脚・中央溝またぎ 2×3マス）
   function renderTactSwitch(part, isSelected) {
     const G = GRID;
     const w = 2 * G;
@@ -577,25 +627,18 @@ window.PARTS_CATALOG = (() => {
 
     return `
       ${selRing}
-      <!-- 4本脚リード -->
       <line x1="0" y1="0" x2="0" y2="${h}" stroke="#94a3b8" stroke-width="3.5" stroke-linecap="round" />
       <line x1="${w}" y1="0" x2="${w}" y2="${h}" stroke="#94a3b8" stroke-width="3.5" stroke-linecap="round" />
-      <!-- 外枠（銀色金属プレート） -->
       <rect x="-4" y="6" width="${w + 8}" height="${h - 12}" rx="5" fill="#e2e8f0" stroke="#64748b" stroke-width="1.6" />
-      <!-- 内側プラスチック -->
       <rect x="0" y="10" width="${w}" height="${h - 20}" rx="3" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
-      <!-- 四隅のリベット -->
       <circle cx="3" cy="13" r="2.2" fill="#475569" />
       <circle cx="${w - 3}" cy="13" r="2.2" fill="#475569" />
       <circle cx="3" cy="${h - 13}" r="2.2" fill="#475569" />
       <circle cx="${w - 3}" cy="${h - 13}" r="2.2" fill="#475569" />
-      <!-- 内部導通ガイド（上2本・下2本がそれぞれ内部で常時接続） -->
       <line x1="2" y1="0" x2="${w - 2}" y2="0" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="2 2" />
       <line x1="2" y1="${h}" x2="${w - 2}" y2="${h}" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="2 2" />
-      <!-- 中央プッシュボタン -->
       <circle cx="${w / 2}" cy="${h / 2}" r="12" fill="${bc.fill}" stroke="${bc.stroke}" stroke-width="1.8" />
       <circle cx="${w / 2 - 3}" cy="${h / 2 - 3}" r="3" fill="#ffffff" opacity="0.28" />
-      <!-- 端子点 -->
       <circle cx="0" cy="0" r="3.8" fill="#475569" stroke="#ffffff" stroke-width="1" />
       <circle cx="${w}" cy="0" r="3.8" fill="#475569" stroke="#ffffff" stroke-width="1" />
       <circle cx="0" cy="${h}" r="3.8" fill="#475569" stroke="#ffffff" stroke-width="1" />
@@ -603,7 +646,7 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // トグルスイッチ（3端子・COM明記・レバー左右切替）
+  // トグルスイッチ（3端子・COM明記）
   function renderToggleSwitch(part, isSelected) {
     const G = GRID;
     const flip = !!part.flipX;
@@ -611,28 +654,21 @@ window.PARTS_CATALOG = (() => {
     const selRing = isSelected
       ? `<rect x="-12" y="-44" width="${2 * G + 24}" height="62" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
       : "";
-
     const leverEndX = leverLeft ? G - 12 : G + 12;
 
     return `
       <rect x="-10" y="-42" width="${2 * G + 20}" height="56" fill="transparent" />
       ${selRing}
-      <!-- 3本端子脚 -->
       <line x1="0" y1="0" x2="0" y2="-10" stroke="#94a3b8" stroke-width="3" />
       <line x1="${G}" y1="0" x2="${G}" y2="-10" stroke="#eab308" stroke-width="3.5" />
       <line x1="${2 * G}" y1="0" x2="${2 * G}" y2="-10" stroke="#94a3b8" stroke-width="3" />
-      <!-- ボディ -->
       <rect x="-6" y="-26" width="${2 * G + 12}" height="18" rx="3" fill="#334155" stroke="#0f172a" stroke-width="1.5" />
-      <!-- スライド／トグルレバー -->
       <line x1="${G}" y1="-26" x2="${leverEndX}" y2="-39" stroke="#cbd5e1" stroke-width="6" stroke-linecap="round" />
       <circle cx="${leverEndX}" cy="-39" r="4" fill="#94a3b8" stroke="#475569" stroke-width="1" />
-      <!-- 接続方向インジケーター -->
       <text x="${G}" y="-14" text-anchor="middle" font-size="8.5" font-weight="700" fill="#fde047" ${unflipAttr(G, -17, flip)}>COM</text>
-      <!-- 端子点 -->
       <circle cx="0" cy="0" r="3.5" fill="#475569" stroke="#ffffff" stroke-width="1" />
       <circle cx="${G}" cy="0" r="4" fill="#eab308" stroke="#ffffff" stroke-width="1" />
       <circle cx="${2 * G}" cy="0" r="3.5" fill="#475569" stroke="#ffffff" stroke-width="1" />
-      <!-- 端子ラベル -->
       <g ${unflipAttr(G, 12, flip)}>
         <rect x="${G - 14}" y="5" width="28" height="12" rx="3" fill="#fef9c3" stroke="#ca8a04" stroke-width="0.9" />
         <text x="${G}" y="14" text-anchor="middle" font-size="8.5" font-weight="800" fill="#854d0e">COM</text>
@@ -648,7 +684,7 @@ window.PARTS_CATALOG = (() => {
     const midX = totalW / 2;
     const flip = !!part.flipX;
     const label = part.props?.label || "B5K";
-    const knobPos = Number(part.props?.knobPos ?? 50); // 0..100
+    const knobPos = Number(part.props?.knobPos ?? 50);
     const angle = -135 + (knobPos / 100) * 270;
 
     const selRing = isSelected
@@ -658,21 +694,16 @@ window.PARTS_CATALOG = (() => {
     return `
       <rect x="${midX - 26}" y="-54" width="52" height="66" fill="transparent" />
       ${selRing}
-      <!-- 3本端子脚 -->
       <line x1="0" y1="0" x2="0" y2="-12" stroke="#94a3b8" stroke-width="3" />
       <line x1="${midX}" y1="0" x2="${midX}" y2="-12" stroke="#2563eb" stroke-width="3.2" />
       <line x1="${totalW}" y1="0" x2="${totalW}" y2="-12" stroke="#94a3b8" stroke-width="3" />
-      <!-- 本体（青ケース） -->
       <rect x="${midX - 22}" y="-50" width="44" height="40" rx="6" fill="#2563eb" stroke="#1e3a8a" stroke-width="1.6" />
-      <!-- つまみ -->
       <circle cx="${midX}" cy="-32" r="14" fill="#f8fafc" stroke="#64748b" stroke-width="1.5" />
       <g transform="translate(${midX}, -32) rotate(${angle})">
         <line x1="0" y1="0" x2="0" y2="-11" stroke="#dc2626" stroke-width="3" stroke-linecap="round" />
       </g>
       <circle cx="${midX}" cy="-32" r="3" fill="#475569" />
-      <!-- B5K 表記 -->
       <text x="${midX}" y="-12" text-anchor="middle" font-size="8.5" font-weight="800" fill="#ffffff" ${unflipAttr(midX, -15, flip)}>${label}</text>
-      <!-- 端子点 -->
       <circle cx="0" cy="0" r="3.5" fill="#475569" stroke="#ffffff" stroke-width="1" />
       <circle cx="${midX}" cy="0" r="4" fill="#2563eb" stroke="#ffffff" stroke-width="1" />
       <circle cx="${totalW}" cy="0" r="3.5" fill="#475569" stroke="#ffffff" stroke-width="1" />
@@ -683,26 +714,25 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // ブザー（＋／−極性マーク付き・パッシブ／アクティブ切替・脚幅調整）
+  // ブザー（無極性・パッシブ／アクティブ切替・脚幅調整）
   function renderBuzzer(part, isSelected) {
     const G = GRID;
     const span = part.props?.span || 3;
     const totalW = span * G;
     const midX = totalW / 2;
     const flip = !!part.flipX;
-    const showPolarity = part.props?.showPolarity !== false;
     const typeLabel = part.props?.buzzerType === "active" ? "アクティブ" : "パッシブ";
 
     const selRing = isSelected
-      ? `<rect x="${Math.min(-14, midX - 28)}" y="-56" width="${Math.max(totalW + 28, 56)}" height="68" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
+      ? `<rect x="${Math.min(-10, midX - 28)}" y="-56" width="${Math.max(totalW + 20, 56)}" height="66" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
       : "";
 
     return `
-      <rect x="${Math.min(-10, midX - 26)}" y="-54" width="${Math.max(totalW + 20, 52)}" height="62" fill="transparent" />
+      <rect x="${Math.min(-8, midX - 26)}" y="-54" width="${Math.max(totalW + 16, 52)}" height="60" fill="transparent" />
       ${selRing}
-      <!-- リード線 -->
-      <path d="M 0,0 L 0,-12 L ${midX - 10},-22" fill="none" stroke="#64748b" stroke-width="3" stroke-linecap="round" />
-      <path d="M ${totalW},0 L ${totalW},-12 L ${midX + 10},-22" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" />
+      <!-- リード線（無極性のため左右対称） -->
+      <path d="M 0,0 L 0,-12 L ${midX - 10},-22" fill="none" stroke="#94a3b8" stroke-width="3" stroke-linecap="round" />
+      <path d="M ${totalW},0 L ${totalW},-12 L ${midX + 10},-22" fill="none" stroke="#94a3b8" stroke-width="3" stroke-linecap="round" />
       <!-- 円筒ブザー本体 -->
       <circle cx="${midX}" cy="-28" r="23" fill="#1e293b" stroke="#0f172a" stroke-width="2" />
       <circle cx="${midX}" cy="-28" r="19" fill="none" stroke="#475569" stroke-width="1" />
@@ -710,19 +740,9 @@ window.PARTS_CATALOG = (() => {
       <circle cx="${midX}" cy="-28" r="5.5" fill="#0f172a" stroke="#94a3b8" stroke-width="1.2" />
       <!-- 種類表記 -->
       <text x="${midX}" y="-12" text-anchor="middle" font-size="7.5" font-weight="700" fill="#cbd5e1" ${unflipAttr(midX, -15, flip)}>${typeLabel}</text>
-      <!-- 端子点 -->
-      <circle cx="0" cy="0" r="3.8" fill="#dc2626" stroke="#ffffff" stroke-width="1" />
-      <circle cx="${totalW}" cy="0" r="3.8" fill="#1e293b" stroke="#ffffff" stroke-width="1" />
-      ${showPolarity ? `
-        <g ${unflipAttr(-11, -10, flip)}>
-          <circle cx="-11" cy="-10" r="7.5" fill="#dc2626" />
-          <text x="-11" y="-6.5" text-anchor="middle" font-size="11" font-weight="800" fill="#ffffff">+</text>
-        </g>
-        <g ${unflipAttr(totalW + 11, -10, flip)}>
-          <circle cx="${totalW + 11}" cy="-10" r="7.5" fill="#1e293b" />
-          <text x="${totalW + 11}" y="-6.5" text-anchor="middle" font-size="11" font-weight="800" fill="#ffffff">−</text>
-        </g>
-      ` : ""}
+      <!-- 無極性端子点 -->
+      <circle cx="0" cy="0" r="3.8" fill="#475569" stroke="#ffffff" stroke-width="1" />
+      <circle cx="${totalW}" cy="0" r="3.8" fill="#475569" stroke="#ffffff" stroke-width="1" />
     `;
   }
 
@@ -765,14 +785,11 @@ window.PARTS_CATALOG = (() => {
 
     return `
       ${selRing}
-      <!-- 上側の浮いている側（反対側8ピンは挿さない目印） -->
       <g ${unflipAttr(3.5 * G, boxY - 8, flip)}>
         <text x="${3.5 * G}" y="${boxY - 6}" text-anchor="middle" font-size="8.5" font-weight="600" fill="#64748b">↑ 反対側（挿さない）</text>
       </g>
-      <!-- マトリクス本体 -->
       <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="4" fill="#1e293b" stroke="#0f172a" stroke-width="2" />
       ${dotsSvg}
-      <!-- 文字側ラベル帯 -->
       <g ${unflipAttr(3.5 * G, -14, flip)}>
         <rect x="${boxX + 12}" y="-21" width="${boxW - 24}" height="14" rx="3" fill="#fef2f2" stroke="#dc2626" stroke-width="1.2" />
         <text x="${3.5 * G}" y="-11" text-anchor="middle" font-size="8.5" font-weight="800" fill="#b91c1c">1088BS 文字側（8本差し）</text>
@@ -781,7 +798,7 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // MAX7219搭載 8x8マトリクスLED（SPI 5本ピン：VCC/GND/DIN/CS/CLK）
+  // MAX7219搭載 8x8マトリクスLED（SPI 5本ピン）
   function renderMatrixMax7219(part, isSelected) {
     const G = GRID;
     const flip = !!part.flipX;
@@ -835,12 +852,9 @@ window.PARTS_CATALOG = (() => {
 
     return `
       ${selRing}
-      <!-- PCB基板 -->
       <rect x="${pcbX}" y="${pcbY}" width="${pcbW}" height="${pcbH}" rx="5" fill="#15803d" stroke="#14532d" stroke-width="1.8" />
-      <!-- 8x8マトリクス本体 -->
       <rect x="${matX}" y="${matY}" width="${matSize}" height="${matSize}" rx="3" fill="#1e293b" stroke="#0f172a" stroke-width="1.5" />
       ${dotsSvg}
-      <!-- 基板名 -->
       <text x="${3 * G}" y="${matY + matSize + 13}" text-anchor="middle" font-size="8.5" font-weight="800" fill="#dcfce7" ${unflipAttr(3 * G, matY + matSize + 10, flip)}>MAX7219 (SPI)</text>
       ${pinsSvg}
     `;
@@ -895,12 +909,9 @@ window.PARTS_CATALOG = (() => {
 
     return `
       ${selRing}
-      <!-- 基板（緑） -->
       <rect x="${pcbX}" y="${pcbY}" width="${pcbW}" height="${pcbH}" rx="5" fill="#047857" stroke="#064e3b" stroke-width="1.8" />
-      <!-- 7セグ黒ケース（数字部分は反転時にも読めるよう正立） -->
       <g ${unflipAttr(dispX + dispW / 2, dispY + dispH / 2, flip)}>
         <rect x="${dispX}" y="${dispY}" width="${dispW}" height="${dispH}" rx="3" fill="#0f172a" stroke="#475569" stroke-width="1.2" />
-        <!-- 各セグメント a..g -->
         <rect x="${dispX + 14}" y="${dispY + 6}"  width="28" height="5.5" rx="2.5" fill="${segColor('a')}" />
         <rect x="${dispX + 41}" y="${dispY + 11}" width="5.5" height="18" rx="2.5" fill="${segColor('b')}" />
         <rect x="${dispX + 41}" y="${dispY + 33}" width="5.5" height="18" rx="2.5" fill="${segColor('c')}" />

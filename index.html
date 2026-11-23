@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>Pico 実体配線図エディタ（Phase 1）</title>
+  <title>Pico 実体配線図エディタ</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
@@ -39,9 +39,14 @@
         </select>
       </label>
 
-      <label class="toggle-label">
+      <label class="toggle-label" title="刺さっている列の横5穴を青い帯で強調表示">
         <input type="checkbox" id="toggle-continuity" checked />
         導通ハイライト
+      </label>
+
+      <label class="toggle-label lock-toggle" title="ONにするとブレッドボードが誤って選択・移動されなくなります">
+        <input type="checkbox" id="toggle-lock-boards" checked />
+        🔒 ボード固定
       </label>
     </div>
 
@@ -77,11 +82,43 @@
         <h3>LESSON 01 部品</h3>
         <button class="part-btn" data-add-part="led">
           <span class="part-icon">🔴</span>
-          <span>LED（極性・長短脚）</span>
+          <span>LED（脚幅調整・極性）</span>
         </button>
         <button class="part-btn" data-add-part="resistor">
           <span class="part-icon">⚡</span>
-          <span>抵抗（カラーコード）</span>
+          <span>抵抗（数値入力可）</span>
+        </button>
+        <button class="part-btn" data-add-part="tact_switch">
+          <span class="part-icon">🔘</span>
+          <span>タクトスイッチ (4本脚)</span>
+        </button>
+        <button class="part-btn" data-add-part="toggle_switch">
+          <span class="part-icon">🔀</span>
+          <span>トグルスイッチ (3端子)</span>
+        </button>
+        <button class="part-btn" data-add-part="potentiometer">
+          <span class="part-icon">🎛️</span>
+          <span>可変抵抗 (B5K)</span>
+        </button>
+        <button class="part-btn" data-add-part="seven_seg">
+          <span class="part-icon">8️⃣</span>
+          <span>7セグLED (AE-7SEG)</span>
+        </button>
+      </div>
+
+      <div class="panel-section">
+        <h3>LESSON 02〜03 部品</h3>
+        <button class="part-btn" data-add-part="buzzer">
+          <span class="part-icon">🔊</span>
+          <span>ブザー（極性マーク付）</span>
+        </button>
+        <button class="part-btn" data-add-part="matrix_1088bs">
+          <span class="part-icon">🟥</span>
+          <span>8×8マトリクス (1088BS)</span>
+        </button>
+        <button class="part-btn" data-add-part="matrix_max7219">
+          <span class="part-icon">📟</span>
+          <span>MAX7219 SPIモジュール</span>
         </button>
       </div>
 
@@ -96,11 +133,11 @@
       <div class="help-box">
         <strong>操作ヒント</strong>
         <ul>
-          <li>部品ドラッグ：穴に自動スナップ</li>
-          <li><b>R</b>キー：選択部品を90°回転</li>
+          <li><b>R</b>：90°回転 / <b>F</b>：左右反転</li>
           <li><b>Delete</b>：選択物を削除</li>
-          <li>配線：始点→終点をクリック（後から角をドラッグ移動／辺の中点「＋」で経由点追加）</li>
-          <li>空白ドラッグ：画面移動 / ホイール：拡大縮小</li>
+          <li><b>GND接続線</b>は自動で黒になります</li>
+          <li>ボードを動かす時は上の<b>🔒ボード固定</b>をOFF</li>
+          <li>空白ドラッグ：移動 / ホイール：拡大縮小</li>
         </ul>
       </div>
     </aside>
@@ -108,7 +145,7 @@
     <!-- 中央：SVGキャンバス -->
     <main class="canvas-area">
       <div id="mode-banner" class="mode-banner hidden">
-        配線モード：始点と終点の穴をクリックしてください（Escで解除）
+        配線モード：始点と終点の穴をクリック（GNDに繋がる線は自動で黒になります / Escで解除）
       </div>
       <svg id="canvas-svg" xmlns="http://www.w3.org/2000/svg">
         <defs>
@@ -144,7 +181,7 @@
       <div class="panel-section">
         <h3>プロパティ</h3>
         <div id="property-content" class="property-content">
-          <p class="empty-note">部品やジャンパ線をクリックすると、色や数値、向きを変更できます。</p>
+          <p class="empty-note">部品やジャンパ線をクリックすると、色・数値・脚幅・向き・反転を変更できます。</p>
         </div>
       </div>
     </aside>

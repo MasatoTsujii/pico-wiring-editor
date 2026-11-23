@@ -109,7 +109,8 @@ body {
   cursor: pointer;
 }
 
-.lock-toggle {
+.lock-toggle,
+.pico-trans-toggle {
   background: #f8fafc;
   border: 1px solid #cbd5e1;
   padding: 4px 8px;

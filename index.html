@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Pico 実体配線図エディタ（Phase 1）</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- 上部ツールバー -->
+  <header class="toolbar">
+    <div class="toolbar-group">
+      <span class="app-title">🔌 Pico配線図エディタ</span>
+      <button id="btn-sample" class="btn" title="Lチカ回路のサンプルを読み込む">サンプル</button>
+      <button id="btn-clear" class="btn" title="キャンバスを空にする">新規</button>
+      <button id="btn-load-json" class="btn">JSON読込</button>
+      <input type="file" id="file-json-input" accept=".json" hidden />
+      <button id="btn-save-json" class="btn">JSON保存</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <button id="btn-undo" class="btn" title="元に戻す (Ctrl+Z)">↩ 戻す</button>
+      <button id="btn-mode-select" class="btn active" title="選択・移動モード (V)">↖ 選択</button>
+      <button id="btn-mode-wire" class="btn" title="ジャンパ線を描く (W)">〰 配線</button>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <label class="control-label">
+        Picoピン:
+        <select id="select-pico-pins">
+          <option value="used" selected>使用中のみ強調</option>
+          <option value="all">全ピン表示</option>
+          <option value="none">非表示</option>
+        </select>
+      </label>
+
+      <label class="toggle-label">
+        <input type="checkbox" id="toggle-continuity" checked />
+        導通ハイライト
+      </label>
+    </div>
+
+    <div class="toolbar-divider"></div>
+
+    <div class="toolbar-group">
+      <select id="select-export-bg" title="書き出し背景色">
+        <option value="#ffffff">背景: 白</option>
+        <option value="#f1f5f9">背景: 薄グレー</option>
+        <option value="transparent">背景: 透過</option>
+      </select>
+      <button id="btn-export-png" class="btn btn-primary">PNG書き出し</button>
+    </div>
+  </header>
+
+  <!-- メイン3ペイン -->
+  <div class="workspace">
+    <!-- 左：パーツパレット -->
+    <aside class="sidebar left-sidebar">
+      <div class="panel-section">
+        <h3>基本基板</h3>
+        <button class="part-btn" data-add-part="pico">
+          <span class="part-icon">🟩</span>
+          <span>Raspberry Pi Pico</span>
+        </button>
+        <button class="part-btn" data-add-part="breadboard">
+          <span class="part-icon">⬜</span>
+          <span>ブレッドボード (30列)</span>
+        </button>
+      </div>
+
+      <div class="panel-section">
+        <h3>LESSON 01 部品</h3>
+        <button class="part-btn" data-add-part="led">
+          <span class="part-icon">🔴</span>
+          <span>LED（極性・長短脚）</span>
+        </button>
+        <button class="part-btn" data-add-part="resistor">
+          <span class="part-icon">⚡</span>
+          <span>抵抗（カラーコード）</span>
+        </button>
+      </div>
+
+      <div class="panel-section">
+        <h3>配線</h3>
+        <button class="part-btn" id="palette-wire-btn">
+          <span class="part-icon">〰️</span>
+          <span>ジャンパ線を描く (W)</span>
+        </button>
+      </div>
+
+      <div class="help-box">
+        <strong>操作ヒント</strong>
+        <ul>
+          <li>部品ドラッグ：穴に自動スナップ</li>
+          <li><b>R</b>キー：選択部品を90°回転</li>
+          <li><b>Delete</b>：選択物を削除</li>
+          <li>配線：始点→終点をクリック（後から角をドラッグ移動／辺の中点「＋」で経由点追加）</li>
+          <li>空白ドラッグ：画面移動 / ホイール：拡大縮小</li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- 中央：SVGキャンバス -->
+    <main class="canvas-area">
+      <div id="mode-banner" class="mode-banner hidden">
+        配線モード：始点と終点の穴をクリックしてください（Escで解除）
+      </div>
+      <svg id="canvas-svg" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="bg-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <circle cx="0" cy="0" r="1.1" fill="#cbd5e1" />
+          </pattern>
+        </defs>
+        <g id="viewport">
+          <rect id="grid-bg-rect" x="-4000" y="-4000" width="8000" height="8000" fill="url(#bg-grid)" />
+          <!-- PNG書き出し対象グループ -->
+          <g id="export-root">
+            <g id="layer-boards"></g>
+            <g id="layer-continuity"></g>
+            <g id="layer-parts"></g>
+            <g id="layer-wires"></g>
+            <g id="layer-labels"></g>
+          </g>
+          <!-- 編集用オーバーレイ（書き出し時は非表示） -->
+          <g id="layer-ui"></g>
+        </g>
+      </svg>
+
+      <div class="zoom-controls">
+        <button id="btn-zoom-out" class="btn-icon" title="縮小">−</button>
+        <span id="zoom-label">100%</span>
+        <button id="btn-zoom-in" class="btn-icon" title="拡大">＋</button>
+        <button id="btn-zoom-reset" class="btn-icon" title="表示をリセット">⟲</button>
+      </div>
+    </main>
+
+    <!-- 右：プロパティパネル -->
+    <aside class="sidebar right-sidebar">
+      <div class="panel-section">
+        <h3>プロパティ</h3>
+        <div id="property-content" class="property-content">
+          <p class="empty-note">部品やジャンパ線をクリックすると、色や数値、向きを変更できます。</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="./parts.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

@@ -12,8 +12,9 @@
   <header class="toolbar">
     <div class="toolbar-group">
       <span class="app-title">🔌 Pico配線図エディタ</span>
+      <button id="btn-initial" class="btn" title="縦置きブレッドボード＋Pico直刺しの初期状態に戻す">初期状態</button>
       <button id="btn-sample" class="btn" title="Lチカ回路のサンプルを読み込む">サンプル</button>
-      <button id="btn-clear" class="btn" title="キャンバスを空にする">新規</button>
+      <button id="btn-clear" class="btn" title="キャンバスを空にする">全消去</button>
       <button id="btn-load-json" class="btn">JSON読込</button>
       <input type="file" id="file-json-input" accept=".json" hidden />
       <button id="btn-save-json" class="btn">JSON保存</button>
@@ -44,6 +45,11 @@
         導通ハイライト
       </label>
 
+      <label class="toggle-label pico-trans-toggle" title="ONにするとPico基板が半透明になり、下の穴や配線が見やすくなります">
+        <input type="checkbox" id="toggle-pico-transparent" />
+        👁 Pico透過
+      </label>
+
       <label class="toggle-label lock-toggle" title="ONにするとブレッドボードが誤って選択・移動されなくなります">
         <input type="checkbox" id="toggle-lock-boards" checked />
         🔒 ボード固定
@@ -54,9 +60,9 @@
 
     <div class="toolbar-group">
       <select id="select-export-bg" title="書き出し背景色">
+        <option value="transparent" selected>背景: 透過</option>
         <option value="#ffffff">背景: 白</option>
         <option value="#f1f5f9">背景: 薄グレー</option>
-        <option value="transparent">背景: 透過</option>
       </select>
       <button id="btn-export-png" class="btn btn-primary">PNG書き出し</button>
     </div>
@@ -110,7 +116,7 @@
         <h3>LESSON 02〜03 部品</h3>
         <button class="part-btn" data-add-part="buzzer">
           <span class="part-icon">🔊</span>
-          <span>ブザー（極性マーク付）</span>
+          <span>ブザー（無極性）</span>
         </button>
         <button class="part-btn" data-add-part="matrix_1088bs">
           <span class="part-icon">🟥</span>
@@ -136,7 +142,7 @@
           <li><b>R</b>：90°回転 / <b>F</b>：左右反転</li>
           <li><b>Delete</b>：選択物を削除</li>
           <li><b>GND接続線</b>は自動で黒になります</li>
-          <li>ボードを動かす時は上の<b>🔒ボード固定</b>をOFF</li>
+          <li><b>👁 Pico透過</b>で下の穴や配線を確認できます</li>
           <li>空白ドラッグ：移動 / ホイール：拡大縮小</li>
         </ul>
       </div>
@@ -160,6 +166,7 @@
             <g id="layer-boards"></g>
             <g id="layer-continuity"></g>
             <g id="layer-parts"></g>
+            <g id="layer-continuity-over"></g>
             <g id="layer-wires"></g>
             <g id="layer-labels"></g>
           </g>
@@ -172,7 +179,7 @@
         <button id="btn-zoom-out" class="btn-icon" title="縮小">−</button>
         <span id="zoom-label">100%</span>
         <button id="btn-zoom-in" class="btn-icon" title="拡大">＋</button>
-        <button id="btn-zoom-reset" class="btn-icon" title="表示をリセット">⟲</button>
+        <button id="btn-zoom-reset" class="btn-icon" title="全体を表示">⟲</button>
       </div>
     </main>
 

@@ -11,12 +11,10 @@ window.PARTS_CATALOG = (() => {
     return { gx: fx, gy: ly };
   }
 
-  // 反転時に文字が鏡文字にならないよう打ち消すtransform属性
   function unflipAttr(cx, cy, flipX) {
     return flipX ? `transform="translate(${cx}, ${cy}) scale(-1, 1) translate(${-cx}, ${-cy})"` : "";
   }
 
-  // 回転時に文字を常に正立（水平）に保つtransform属性
   function unrotateAttr(cx, cy, rot) {
     const r = ((rot % 360) + 360) % 360;
     return r !== 0 ? `transform="rotate(${-r}, ${cx}, ${cy})"` : "";
@@ -69,13 +67,22 @@ window.PARTS_CATALOG = (() => {
     green:  { name: "緑", fill: "#16a34a", stroke: "#166534" }
   };
 
-  // 抵抗カラーコード（数字0〜9・乗数）
+  // 吹き出しテーマ色
+  const ANNOTATION_COLORS = [
+    { id: "#2563eb", name: "青", bg: "#eff6ff", text: "#1e3a8a" },
+    { id: "#dc2626", name: "赤", bg: "#fef2f2", text: "#991b1b" },
+    { id: "#16a34a", name: "緑", bg: "#f0fdf4", text: "#14532d" },
+    { id: "#ea580c", name: "橙", bg: "#fff7ed", text: "#9a3412" },
+    { id: "#9333ea", name: "紫", bg: "#faf5ff", text: "#581c87" },
+    { id: "#1e293b", name: "黒", bg: "#ffffff", text: "#0f172a" }
+  ];
+
   const BAND_DIGIT_COLORS = [
     "#111827", "#92400e", "#dc2626", "#f97316", "#eab308",
     "#16a34a", "#2563eb", "#9333ea", "#64748b", "#f8fafc"
   ];
 
-  // 任意の抵抗値文字列からラベルと4本帯カラーコードを計算
+  // 抵抗値のパース＆4本帯カラーコード計算
   function parseResistance(raw) {
     const str = String(raw || "220")
       .replace(/[０-９．ａ-ｚＡ-Ｚ]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
@@ -134,7 +141,6 @@ window.PARTS_CATALOG = (() => {
     };
   }
 
-  // ジャンパ線の色リスト
   const WIRE_COLORS = [
     { id: "#ef4444", name: "赤" },
     { id: "#1e293b", name: "黒（GND共通）" },
@@ -146,7 +152,6 @@ window.PARTS_CATALOG = (() => {
     { id: "#f8fafc", name: "白" }
   ];
 
-  // 8x8 マトリクス点灯パターン
   const MATRIX_PATTERNS = {
     off:   { name: "消灯", dots: [] },
     two:   { name: "2個点灯テスト", dots: [[1, 1], [6, 6]] },
@@ -175,7 +180,6 @@ window.PARTS_CATALOG = (() => {
     }
   };
 
-  // 7セグメント点灯マップ
   const SEVEN_SEG_DIGITS = {
     off: [],
     "0": ["a","b","c","d","e","f"],
@@ -190,7 +194,7 @@ window.PARTS_CATALOG = (() => {
     "9": ["a","b","c","d","f","g"]
   };
 
-  // ブレッドボード（30列・電源レール付き）の導通グループ定義
+  // ブレッドボード導通グループ定義
   function getBreadboardGroups(part) {
     const groups = [];
     const railXs = [];
@@ -305,7 +309,6 @@ window.PARTS_CATALOG = (() => {
 
   // ==================== 各部品のSVG描画 ====================
 
-  // ブレッドボード（回転時にも数字・文字が正立で読みやすい）
   function renderBreadboard(part, isSelected) {
     const G = GRID;
     const rot = part.rot || 0;
@@ -332,7 +335,6 @@ window.PARTS_CATALOG = (() => {
       }
     }
 
-    // 行番号 (1..30) — 縦置きでも正立表示
     let colNums = "";
     for (let col = 0; col < 30; col++) {
       const num = col + 1;
@@ -345,7 +347,6 @@ window.PARTS_CATALOG = (() => {
       colNums += `<text x="${x}" y="${y2}" text-anchor="middle" dominant-baseline="central" font-size="9" font-weight="${bold}" fill="${fill}" ${unrotateAttr(x, y2, rot)}>${num}</text>`;
     }
 
-    // 列記号 (a..j) — 縦置きでも正立表示
     const rowLabels = [
       ["a", 0], ["b", 1], ["c", 2], ["d", 3], ["e", 4],
       ["f", 7], ["g", 8], ["h", 9], ["i", 10], ["j", 11]
@@ -359,7 +360,6 @@ window.PARTS_CATALOG = (() => {
       rowTexts += `<text x="${x2}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="700" fill="#475569" ${unrotateAttr(x2, y, rot)}>${ch}</text>`;
     }
 
-    // 電源レール記号（+ / -）
     const railSigns = [
       [-0.45 * G, -3 * G, "−", "#2563eb"],
       [-0.45 * G, -2 * G, "＋", "#ef4444"],
@@ -388,7 +388,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // Raspberry Pi Pico / Pico 2 W（縦置き文字正立・透過モード対応・基板内ピン番号印字）
   function renderPico(part, isSelected, isTransparent = false) {
     const G = GRID;
     const rot = ((part.rot || 0) % 360 + 360) % 360;
@@ -408,7 +407,6 @@ window.PARTS_CATALOG = (() => {
     for (const p of PICO_PINS) {
       const cx = p.gx * G;
       const cy = p.gy * G;
-      // 基板内側の小さな物理ピン番号（1..40）
       const numY = p.side === "top" ? cy + 13 : cy - 13;
       const numColor = isTransparent ? "#0f172a" : "#ccfbf1";
       pinsSvg += `
@@ -426,7 +424,6 @@ window.PARTS_CATALOG = (() => {
     const logoCx = 14.8 * G;
     const logoCy = 3.5 * G;
 
-    // 縦置きと横置きでロゴを読みやすくレイアウト
     const logoText = isVertical
       ? `<g ${unrotateAttr(logoCx, logoCy, rot)}>
            <text x="${logoCx}" y="${logoCy - 7}" text-anchor="middle" dominant-baseline="central" font-size="10.5" font-weight="800" fill="${isTransparent ? '#064e3b' : '#ffffff'}">Raspberry Pi</text>
@@ -438,27 +435,19 @@ window.PARTS_CATALOG = (() => {
          </g>`;
 
     return `
-      <!-- PCB基板本体（透過モード時はここだけ半透明にして下の穴を見せる） -->
       <rect x="${x0}" y="${y0}" width="${w}" height="${h}" rx="5" fill="#0f766e" fill-opacity="${pcbFillOpacity}" stroke="${stroke}" stroke-width="${strokeW}" />
-      <!-- USB端子 -->
       <rect x="${x0 - 8}" y="${2.4 * G}" width="26" height="${2.2 * G}" rx="3" fill="#cbd5e1" fill-opacity="${subOpacity}" stroke="#64748b" stroke-width="1.5" />
       <text x="${usbCx}" y="${usbCy}" text-anchor="middle" dominant-baseline="central" font-size="8" font-weight="700" fill="#334155" ${unrotateAttr(usbCx, usbCy, rot)}>USB</text>
-      <!-- BOOTSELボタン -->
       <rect x="${2.8 * G}" y="${2.5 * G}" width="26" height="18" rx="3" fill="#f8fafc" fill-opacity="${subOpacity}" stroke="#94a3b8" stroke-width="1.2" />
-      <!-- オンボードLED -->
       <rect x="${2.0 * G}" y="${1.3 * G}" width="10" height="7" rx="1.5" fill="#86efac" fill-opacity="${subOpacity}" stroke="#15803d" stroke-width="0.8" />
-      <!-- RP2040 / RP2350 チップ -->
       <rect x="${8.2 * G}" y="${2.2 * G}" width="${2.6 * G}" height="${2.6 * G}" rx="3" fill="#1e293b" fill-opacity="${subOpacity}" stroke="#475569" stroke-width="1.2" />
       <text x="${chipCx}" y="${chipCy}" text-anchor="middle" dominant-baseline="central" font-size="8.5" font-weight="700" fill="#e2e8f0" ${unrotateAttr(chipCx, chipCy, rot)}>${chipName}</text>
-      <!-- 基板ロゴ -->
       ${logoText}
-      <!-- Pin 1 目印三角 -->
       <polygon points="${0},${5.95 * G} ${-4},${6.35 * G} ${4},${6.35 * G}" fill="#fde047" stroke="#854d0e" stroke-width="0.6" />
       ${pinsSvg}
     `;
   }
 
-  // Picoのピンラベル（直刺し時はブレッドボードの穴を隠さないよう外側へ自動退避）
   function renderPicoLabels(part, mode, usedPinKeys, isMountedOnBoard = false) {
     if (mode === "none") return "";
     const G = GRID;
@@ -477,7 +466,6 @@ window.PARTS_CATALOG = (() => {
       const py = p.worldGy * G;
 
       if (mode === "used") {
-        // ブレッドボード直刺し時は、ボードの左右外（電源レールの外）まで引き出し線を伸ばす
         const dist = isMountedOnBoard ? 138 : 30;
         const lx = px + dir.gx * dist;
         const ly = py + dir.gy * dist;
@@ -497,8 +485,7 @@ window.PARTS_CATALOG = (() => {
           </g>
         `;
       } else {
-        // 全ピン表示
-        const isVerticalPinRow = dir.gy !== 0; // 横置きPico（上下にラベル）
+        const isVerticalPinRow = dir.gy !== 0;
         const text = `${p.num}:${p.label}`;
         const badgeLen = 64;
         const badgeThick = 16;
@@ -530,7 +517,6 @@ window.PARTS_CATALOG = (() => {
     return html;
   }
 
-  // LED（脚幅 1〜5マス対応・長短脚＆極性強調・反転対応）
   function renderLed(part, isSelected) {
     const G = GRID;
     const span = part.props?.span || 1;
@@ -544,10 +530,8 @@ window.PARTS_CATALOG = (() => {
       ? `<rect x="-16" y="-50" width="${totalW + 32}" height="60" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
       : "";
 
-    const hitArea = `<rect x="-12" y="-48" width="${totalW + 24}" height="54" fill="transparent" />`;
-
     return `
-      ${hitArea}
+      <rect x="-12" y="-48" width="${totalW + 24}" height="54" fill="transparent" />
       ${selRing}
       <path d="M 0,0 L 0,-11 L ${midX - 5},-18 L ${midX - 5},-25" fill="none" stroke="#64748b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
       <path d="M ${totalW},0 L ${totalW},-16 L ${midX + 5},-18 L ${midX + 5},-25" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -571,7 +555,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // 抵抗（任意値パース＆カラーコード自動計算）
   function renderResistor(part, isSelected) {
     const G = GRID;
     const span = part.props?.span || 4;
@@ -615,7 +598,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // タクトスイッチ（4本脚・中央溝またぎ 2×3マス）
   function renderTactSwitch(part, isSelected) {
     const G = GRID;
     const w = 2 * G;
@@ -646,7 +628,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // トグルスイッチ（3端子・COM明記）
   function renderToggleSwitch(part, isSelected) {
     const G = GRID;
     const flip = !!part.flipX;
@@ -676,7 +657,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // 可変抵抗（B5K・3端子）
   function renderPotentiometer(part, isSelected) {
     const G = GRID;
     const step = part.props?.step || 1;
@@ -714,7 +694,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // ブザー（無極性・パッシブ／アクティブ切替・脚幅調整）
   function renderBuzzer(part, isSelected) {
     const G = GRID;
     const span = part.props?.span || 3;
@@ -730,23 +709,18 @@ window.PARTS_CATALOG = (() => {
     return `
       <rect x="${Math.min(-8, midX - 26)}" y="-54" width="${Math.max(totalW + 16, 52)}" height="60" fill="transparent" />
       ${selRing}
-      <!-- リード線（無極性のため左右対称） -->
       <path d="M 0,0 L 0,-12 L ${midX - 10},-22" fill="none" stroke="#94a3b8" stroke-width="3" stroke-linecap="round" />
       <path d="M ${totalW},0 L ${totalW},-12 L ${midX + 10},-22" fill="none" stroke="#94a3b8" stroke-width="3" stroke-linecap="round" />
-      <!-- 円筒ブザー本体 -->
       <circle cx="${midX}" cy="-28" r="23" fill="#1e293b" stroke="#0f172a" stroke-width="2" />
       <circle cx="${midX}" cy="-28" r="19" fill="none" stroke="#475569" stroke-width="1" />
-      <!-- 中央の放音穴 -->
       <circle cx="${midX}" cy="-28" r="5.5" fill="#0f172a" stroke="#94a3b8" stroke-width="1.2" />
-      <!-- 種類表記 -->
       <text x="${midX}" y="-12" text-anchor="middle" font-size="7.5" font-weight="700" fill="#cbd5e1" ${unflipAttr(midX, -15, flip)}>${typeLabel}</text>
-      <!-- 無極性端子点 -->
       <circle cx="0" cy="0" r="3.8" fill="#475569" stroke="#ffffff" stroke-width="1" />
       <circle cx="${totalW}" cy="0" r="3.8" fill="#475569" stroke="#ffffff" stroke-width="1" />
     `;
   }
 
-  // 8x8 マトリクスLED（1088BS単体・文字側8本ピン差し表現）
+  // 8x8 マトリクスLED（単体：「文字側」のみ表記）
   function renderMatrix1088BS(part, isSelected) {
     const G = GRID;
     const flip = !!part.flipX;
@@ -791,14 +765,13 @@ window.PARTS_CATALOG = (() => {
       <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="4" fill="#1e293b" stroke="#0f172a" stroke-width="2" />
       ${dotsSvg}
       <g ${unflipAttr(3.5 * G, -14, flip)}>
-        <rect x="${boxX + 12}" y="-21" width="${boxW - 24}" height="14" rx="3" fill="#fef2f2" stroke="#dc2626" stroke-width="1.2" />
-        <text x="${3.5 * G}" y="-11" text-anchor="middle" font-size="8.5" font-weight="800" fill="#b91c1c">1088BS 文字側（8本差し）</text>
+        <rect x="${3.5 * G - 26}" y="-22" width="52" height="15" rx="3.5" fill="#fef2f2" stroke="#dc2626" stroke-width="1.3" />
+        <text x="${3.5 * G}" y="-11" text-anchor="middle" font-size="9.5" font-weight="800" fill="#b91c1c">文字側</text>
       </g>
       ${pinsSvg}
     `;
   }
 
-  // MAX7219搭載 8x8マトリクスLED（SPI 5本ピン）
   function renderMatrixMax7219(part, isSelected) {
     const G = GRID;
     const flip = !!part.flipX;
@@ -860,7 +833,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // 7セグメントLEDモジュール（AE-7SEG-BOARD / 74HC595）
   function renderSevenSeg(part, isSelected) {
     const G = GRID;
     const flip = !!part.flipX;
@@ -931,6 +903,7 @@ window.PARTS_CATALOG = (() => {
     PICO_PINS,
     LED_COLORS,
     BUTTON_COLORS,
+    ANNOTATION_COLORS,
     WIRE_COLORS,
     MATRIX_PATTERNS,
     SEVEN_SEG_DIGITS,

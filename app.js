@@ -5,19 +5,22 @@
     parseResistance, getBreadboardGroups, getPartPinsWorld,
     renderBreadboard, renderPico, renderPicoLabels, renderLed, renderResistor,
     renderTactSwitch, renderToggleSwitch, renderPotentiometer, renderBuzzer,
-    renderMatrix1088BS, renderMatrixMax7219, renderSevenSeg
+    renderMatrix1088BS, renderMatrixMax7219, renderSevenSeg,
+    renderRfidRc522, renderServoSg90, renderDht11, renderFingerprintAs608
   } = window.PARTS_CATALOG;
 
   const GND_COLOR = "#1e293b";
 
-  // 吹き出しの定型文プリセット（授業スライド向け）
+  // 吹き出しの定型文プリセット
   const ANNOTATION_PRESETS = [
     "長い脚（アノード＋）",
     "短い脚（カソード−）",
     "抵抗は 220Ω",
     "中央の溝をまたぐ",
     "文字側の8本をさす",
-    "同じ横の列はつながっている"
+    "同じ横の列はつながっている",
+    "3.3Vに接続（5VはNG）",
+    "TXとRXはクロス接続"
   ];
 
   // アプリケーション状態
@@ -34,11 +37,12 @@
   };
 
   let history = [];
-  let selected = null;          // { kind: 'part' | 'wire' | 'annotation', id: string }
-  let mode = "select";          // 'select' | 'wire' | 'annotate'
+  let selected = null;
+  let mode = "select";
   let wireDraft = null;
   let lastWireColor = "#ef4444";
   let lastAnnColor = "#2563eb";
+  let toastTimer = null;
 
   let lastConnectivity = {
     activeGroups: [],
@@ -46,7 +50,7 @@
     usedPicoPinKeys: new Set(),
     mountedPicoIds: new Set(),
     gndGridKeys: new Set(),
-    gridToPicoPin: new Map()    // "gx,gy" -> { num, label }（注釈のピン自動入力用）
+    gridToPicoPin: new Map()
   };
 
   let view = { x: 80, y: 40, scale: 0.9 };
@@ -77,6 +81,30 @@
       .replace(/"/g, "&quot;");
   }
 
+  // alert() の代わりに画面上部のバナーでメッセージを表示
+  function showToast(message, duration = 2800) {
+    if (toastTimer) clearTimeout(toastTimer);
+    modeBanner.textContent = message;
+    modeBanner.classList.remove("hidden");
+    toastTimer = setTimeout(() => {
+      toastTimer = null;
+      updateModeBanner();
+    }, duration);
+  }
+
+  function updateModeBanner() {
+    if (toastTimer) return;
+    if (mode === "wire") {
+      modeBanner.textContent = "配線モード：始点と終点の穴をクリック（GNDに繋がる線は自動で黒 / Escで解除）";
+      modeBanner.classList.remove("hidden");
+    } else if (mode === "annotate") {
+      modeBanner.textContent = "注釈モード：吹き出しの矢印で指したい位置をクリックしてください（Escで解除）";
+      modeBanner.classList.remove("hidden");
+    } else {
+      modeBanner.classList.add("hidden");
+    }
+  }
+
   function saveHistory() {
     history.push(JSON.stringify(state));
     if (history.length > 50) history.shift();
@@ -105,6 +133,15 @@
     return { gx: Math.round(x / GRID), gy: Math.round(y / GRID) };
   }
 
+  // 対象となるメインのブレッドボードを取得
+  function getPrimaryBreadboard() {
+    if (selected?.kind === "part") {
+      const p = state.parts.find(x => x.id === selected.id && x.type === "breadboard");
+      if (p) return p;
+    }
+    return state.parts.find(x => x.type === "breadboard") || null;
+  }
+
   function fitToView() {
     const exportRoot = document.getElementById("export-root");
     const bbox = exportRoot.getBBox();
@@ -117,7 +154,7 @@
     const pad = 60;
     const scaleX = (rect.width - pad * 2) / bbox.width;
     const scaleY = (rect.height - pad * 2) / bbox.height;
-    const scale = Math.min(1.1, Math.max(0.45, Math.min(scaleX, scaleY)));
+    const scale = Math.min(1.1, Math.max(0.42, Math.min(scaleX, scaleY)));
     const cx = bbox.x + bbox.width / 2;
     const cy = bbox.y + bbox.height / 2;
     view.scale = scale;
@@ -126,12 +163,12 @@
     renderCanvas();
   }
 
-  // デフォルト初期表示：縦置きブレッドボード＋Pico直刺しのみ
+  // デフォルト初期表示：縦置きブレッドボード(30行)＋Pico直刺しのみ
   function loadInitialBoard(recordHistory = true) {
     if (recordHistory) saveHistory();
     state = {
       parts: [
-        { id: "bb_1", type: "breadboard", gx: 16, gy: 5, rot: 90, flipX: false, props: {} },
+        { id: "bb_1", type: "breadboard", gx: 16, gy: 5, rot: 90, flipX: false, props: { rows: 30, cutBottom: true } },
         { id: "pico_1", type: "pico", gx: 14, gy: 5, rot: 90, flipX: false, props: { model: "Raspberry Pi Pico" } }
       ],
       wires: [],
@@ -154,7 +191,7 @@
     saveHistory();
     state = {
       parts: [
-        { id: "bb_1", type: "breadboard", gx: 2, gy: 13, rot: 0, flipX: false, props: {} },
+        { id: "bb_1", type: "breadboard", gx: 2, gy: 13, rot: 0, flipX: false, props: { rows: 30, cutBottom: false } },
         { id: "pico_1", type: "pico", gx: 3, gy: 1, rot: 0, flipX: false, props: { model: "Raspberry Pi Pico" } },
         { id: "res_1", type: "resistor", gx: 14, gy: 15, rot: 0, flipX: false, props: { value: "220", span: 4, showLabel: true } },
         { id: "led_1", type: "led", gx: 18, gy: 16, rot: 0, flipX: false, props: { color: "red", span: 1, showPolarity: true } }
@@ -216,7 +253,7 @@
     render();
   }
 
-  // 導通・使用中Picoピン・直刺し判定・GNDネット・ピン辞書計算
+  // 導通・使用中Picoピン・直刺し判定・GNDネット計算
   function computeConnectivity() {
     const nonPicoPinPoints = new Map();
     const picoPinPoints = new Set();
@@ -291,7 +328,6 @@
           }
         }
 
-        // Picoピンが刺さっている横5穴のどの穴を指してもピン情報が引けるようにする
         if (picoKeysInGroup.length === 1) {
           const pinInfo = gridToPicoPin.get(picoKeysInGroup[0]);
           if (pinInfo) {
@@ -356,7 +392,7 @@
     return isGndGrid(wire.points[0]) || isGndGrid(wire.points[wire.points.length - 1]);
   }
 
-  // 吹き出しのサイズ計算（日本語全角・半角の幅を見積もり）
+  // 吹き出しサイズ計算
   function measureAnnotationBox(ann) {
     const fontSize = Number(ann.fontSize || 13);
     const lines = String(ann.text || "注釈").split("\n");
@@ -376,7 +412,6 @@
     return { w, h, lines, lineH, fontSize, padY };
   }
 
-  // 吹き出しの枠と引き出し線の交点を計算
   function getBoxEdgePoint(boxX, boxY, w, h, targetX, targetY) {
     const dx = targetX - boxX;
     const dy = targetY - boxY;
@@ -389,7 +424,6 @@
     return { x: boxX + dx * t, y: boxY + dy * t };
   }
 
-  // 吹き出し1件のSVG HTML生成
   function renderAnnotationSvg(ann, isSelected) {
     const theme = ANNOTATION_COLORS.find(c => c.id === ann.color) || ANNOTATION_COLORS[0];
     const { w, h, lines, lineH, fontSize, padY } = measureAnnotationBox(ann);
@@ -403,7 +437,6 @@
       const dy = ann.anchorY - edge.y;
       const len = Math.hypot(dx, dy);
 
-      // 矢印の羽（先端から8px手前に配置）
       let arrowHead = "";
       if (len > 12) {
         const ux = dx / len;
@@ -518,6 +551,10 @@
       else if (part.type === "matrix_1088bs") g.innerHTML = renderMatrix1088BS(part, isSel);
       else if (part.type === "matrix_max7219") g.innerHTML = renderMatrixMax7219(part, isSel);
       else if (part.type === "seven_seg") g.innerHTML = renderSevenSeg(part, isSel);
+      else if (part.type === "rfid_rc522") g.innerHTML = renderRfidRc522(part, isSel);
+      else if (part.type === "servo_sg90") g.innerHTML = renderServoSg90(part, isSel);
+      else if (part.type === "dht11") g.innerHTML = renderDht11(part, isSel);
+      else if (part.type === "fingerprint_as608") g.innerHTML = renderFingerprintAs608(part, isSel);
       layerParts.appendChild(g);
     }
 
@@ -567,7 +604,7 @@
       layerLabels.appendChild(g);
     }
 
-    // 6. 吹き出し・引き出し線付き注釈ラベル（最前面）
+    // 6. 吹き出し・引き出し線付き注釈ラベル
     layerAnnotations.innerHTML = "";
     for (const ann of state.annotations) {
       const isSel = selected?.kind === "annotation" && selected.id === ann.id;
@@ -576,7 +613,7 @@
       layerAnnotations.appendChild(g);
     }
 
-    // 7. UIオーバーレイ（編集ハンドル）
+    // 7. UIオーバーレイ
     layerUI.innerHTML = "";
     if (selected?.kind === "wire") {
       const wire = state.wires.find(w => w.id === selected.id);
@@ -584,7 +621,6 @@
     } else if (selected?.kind === "annotation") {
       const ann = state.annotations.find(a => a.id === selected.id);
       if (ann && ann.showArrow !== false) {
-        // 先端のドラッグハンドル（大きく掴みやすく表示）
         const h = createSvgEl("circle", {
           class: "ann-anchor-handle",
           cx: ann.anchorX,
@@ -665,7 +701,6 @@
     return el;
   }
 
-  // 注釈先端付近にあるPicoピン情報を取得
   function getPinInfoAtPoint(wx, wy) {
     const g = worldToGrid(wx, wy);
     return lastConnectivity.gridToPicoPin.get(`${g.gx},${g.gy}`) || null;
@@ -674,6 +709,10 @@
   // 右プロパティパネル
   function renderPropertyPanel() {
     if (!selected) {
+      const bb = getPrimaryBreadboard();
+      const bbRows = Number(bb?.props?.rows || 30);
+      const bbCut = bb ? (bb.props?.cutBottom !== undefined ? !!bb.props.cutBottom : bbRows < 60) : false;
+
       propContent.innerHTML = `
         <p class="empty-note">部品・ジャンパ線・吹き出しをクリックすると、色や文字、向きを変更できます。</p>
         <div class="prop-row" style="margin-top:14px;">
@@ -684,17 +723,45 @@
             `).join("")}
           </div>
         </div>
+        ${bb ? `
+          <div class="prop-row" style="margin-top:14px; padding-top:12px; border-top:1px solid #e2e8f0;">
+            <label>ブレッドボード拡張（現在 ${bbRows}行）</label>
+            <div class="preset-row">
+              ${[30, 36, 42, 48, 54, 60, 63].map(r => `
+                <button class="btn btn-sm ${bbRows === r ? "active" : ""}" data-quick-rows="${r}">${r}行</button>
+              `).join("")}
+            </div>
+            <label class="toggle-label" style="margin-top:8px;">
+              <input type="checkbox" id="prop-quick-cut" ${bbCut ? "checked" : ""} />
+              下端に「下に続く」波線を表示
+            </label>
+          </div>
+        ` : ""}
       `;
+
       propContent.querySelectorAll("[data-default-wire-color]").forEach(el => {
         el.addEventListener("click", () => {
           lastWireColor = el.dataset.defaultWireColor;
           renderPropertyPanel();
         });
       });
+
+      propContent.querySelectorAll("[data-quick-rows]").forEach(el => {
+        el.addEventListener("click", () => {
+          setBoardRows(Number(el.dataset.quickRows));
+        });
+      });
+
+      document.getElementById("prop-quick-cut")?.addEventListener("change", (e) => {
+        if (!bb) return;
+        saveHistory();
+        bb.props.cutBottom = e.target.checked;
+        renderCanvas();
+      });
       return;
     }
 
-    // ---------- 吹き出し・注釈ラベルのプロパティ ----------
+    // ---------- 吹き出し・注釈ラベル ----------
     if (selected.kind === "annotation") {
       const ann = state.annotations.find(a => a.id === selected.id);
       if (!ann) return;
@@ -808,13 +875,37 @@
         buzzer: "ブザー（無極性）",
         matrix_1088bs: "8×8マトリクス (単体)",
         matrix_max7219: "MAX7219 SPIモジュール",
-        seven_seg: "7セグLED (AE-7SEG)"
+        seven_seg: "7セグLED (AE-7SEG)",
+        rfid_rc522: "RFID (RC522)",
+        servo_sg90: "サーボモーター (SG90)",
+        dht11: "温湿度センサー (DHT11)",
+        fingerprint_as608: "指紋リーダー (AS608)"
       };
 
       const canFlip = part.type !== "pico" && part.type !== "breadboard";
 
       let extra = "";
-      if (part.type === "pico") {
+      if (part.type === "breadboard") {
+        const rows = Number(part.props?.rows || 30);
+        const cutBottom = part.props?.cutBottom !== undefined ? !!part.props.cutBottom : (rows < 60);
+        extra += `
+          <div class="prop-row">
+            <label>表示行数（下方向へ拡張）</label>
+            <div class="preset-row">
+              ${[30, 36, 42, 48, 54, 60, 63].map(r => `
+                <button class="btn btn-sm ${rows === r ? "active" : ""}" data-bb-rows="${r}">${r}行</button>
+              `).join("")}
+            </div>
+          </div>
+          <div class="prop-row">
+            <label class="toggle-label">
+              <input type="checkbox" id="prop-bb-cut" ${cutBottom ? "checked" : ""} />
+              下端に「下に続く」波線を表示
+            </label>
+          </div>
+          <p class="empty-note">長いボードをスライドに貼る際は、右上の「範囲: 上側 / 下側」で分割書き出しもできます。</p>
+        `;
+      } else if (part.type === "pico") {
         extra += `
           <div class="prop-row">
             <label>基板表記</label>
@@ -960,6 +1051,48 @@
             </label>
           </div>
         `;
+      } else if (part.type === "rfid_rc522") {
+        extra += `
+          <p class="empty-note">SPI通信（SDA/SCK/MOSI/MISO/RST）＋電源3.3V・GNDです。<br>※5V（VBUS）には繋がないよう注意喚起できます。</p>
+        `;
+      } else if (part.type === "servo_sg90") {
+        const angle = Number(part.props.angle ?? 90);
+        extra += `
+          <div class="prop-row">
+            <label>サーボホーン角度: <span id="servo-angle-val">${angle}</span>°</label>
+            <input type="range" id="prop-servo-angle" min="0" max="180" step="15" value="${angle}" />
+            <div class="preset-row">
+              <button class="btn btn-sm" data-servo-preset="0">0°</button>
+              <button class="btn btn-sm" data-servo-preset="90">90°</button>
+              <button class="btn btn-sm" data-servo-preset="180">180°</button>
+            </div>
+          </div>
+          <p class="empty-note">茶＝GND / 赤＝5V（VBUS） / 橙＝PWM信号</p>
+        `;
+      } else if (part.type === "dht11") {
+        const order = part.props.pinOrder || "vcc_out_gnd";
+        extra += `
+          <div class="prop-row">
+            <label>モジュールのピン配列</label>
+            <select id="prop-dht11-order">
+              <option value="vcc_out_gnd" ${order === "vcc_out_gnd" ? "selected" : ""}>+ (VCC) / OUT / − (GND)</option>
+              <option value="out_vcc_gnd" ${order === "out_vcc_gnd" ? "selected" : ""}>OUT / + (VCC) / − (GND)</option>
+            </select>
+          </div>
+          <p class="empty-note">実物基板の印字に合わせてピン順を切り替えられます。</p>
+        `;
+      } else if (part.type === "fingerprint_as608") {
+        const pinCount = Number(part.props.pinCount || 4);
+        extra += `
+          <div class="prop-row">
+            <label>表示ピン数</label>
+            <div class="prop-btn-row">
+              <button class="btn ${pinCount === 4 ? "active" : ""}" data-as608-pins="4">4本 (標準UART)</button>
+              <button class="btn ${pinCount === 6 ? "active" : ""}" data-as608-pins="6">6本 (全ピン)</button>
+            </div>
+          </div>
+          <p class="empty-note">赤＝3.3V / 黄＝TX / 白＝RX / 黒＝GND<br>※PicoとはTX↔RXをクロス接続します。</p>
+        `;
       }
 
       propContent.innerHTML = `
@@ -978,6 +1111,18 @@
       document.getElementById("prop-rotate")?.addEventListener("click", rotateSelectedPart);
       document.getElementById("prop-flip")?.addEventListener("click", flipSelectedPart);
       document.getElementById("prop-delete")?.addEventListener("click", deleteSelected);
+
+      // ブレッドボード
+      propContent.querySelectorAll("[data-bb-rows]").forEach(el => {
+        el.addEventListener("click", () => {
+          setBoardRows(Number(el.dataset.bbRows), part);
+        });
+      });
+      document.getElementById("prop-bb-cut")?.addEventListener("change", (e) => {
+        saveHistory();
+        part.props.cutBottom = e.target.checked;
+        renderCanvas();
+      });
 
       document.getElementById("prop-pico-model")?.addEventListener("change", (e) => {
         saveHistory();
@@ -1101,6 +1246,37 @@
         render();
       });
 
+      // サーボ SG90
+      document.getElementById("prop-servo-angle")?.addEventListener("input", (e) => {
+        part.props.angle = Number(e.target.value);
+        const val = document.getElementById("servo-angle-val");
+        if (val) val.textContent = part.props.angle;
+        renderCanvas();
+      });
+      propContent.querySelectorAll("[data-servo-preset]").forEach(el => {
+        el.addEventListener("click", () => {
+          saveHistory();
+          part.props.angle = Number(el.dataset.servoPreset);
+          render();
+        });
+      });
+
+      // DHT11
+      document.getElementById("prop-dht11-order")?.addEventListener("change", (e) => {
+        saveHistory();
+        part.props.pinOrder = e.target.value;
+        render();
+      });
+
+      // AS608
+      propContent.querySelectorAll("[data-as608-pins]").forEach(el => {
+        el.addEventListener("click", () => {
+          saveHistory();
+          part.props.pinCount = Number(el.dataset.as608Pins);
+          render();
+        });
+      });
+
     } else if (selected.kind === "wire") {
       const wire = state.wires.find(w => w.id === selected.id);
       if (!wire) return;
@@ -1137,22 +1313,27 @@
     }
   }
 
+  // ブレッドボードの行数を変更（既存部品やPicoの位置を保ったまま下に延長・短縮）
+  function setBoardRows(rows, targetBoard = null) {
+    const bb = targetBoard || getPrimaryBreadboard();
+    if (!bb) {
+      showToast("ブレッドボードが配置されていません。");
+      return;
+    }
+    saveHistory();
+    bb.props = bb.props || {};
+    bb.props.rows = rows;
+    bb.props.cutBottom = rows < 60;
+    syncToolbarFromState();
+    render();
+  }
+
   function setMode(newMode) {
     mode = newMode;
     wireDraft = null;
     svg.classList.toggle("wire-mode", mode === "wire");
     svg.classList.toggle("annotate-mode", mode === "annotate");
-
-    if (mode === "wire") {
-      modeBanner.textContent = "配線モード：始点と終点の穴をクリック（GNDに繋がる線は自動で黒 / Escで解除）";
-      modeBanner.classList.remove("hidden");
-    } else if (mode === "annotate") {
-      modeBanner.textContent = "注釈モード：吹き出しの矢印で指したい位置をクリックしてください（Escで解除）";
-      modeBanner.classList.remove("hidden");
-    } else {
-      modeBanner.classList.add("hidden");
-    }
-
+    updateModeBanner();
     document.getElementById("btn-mode-select").classList.toggle("active", mode === "select");
     document.getElementById("btn-mode-wire").classList.toggle("active", mode === "wire");
     document.getElementById("btn-mode-annotate").classList.toggle("active", mode === "annotate");
@@ -1188,6 +1369,7 @@
       state.annotations = state.annotations.filter(a => a.id !== selected.id);
     }
     selected = null;
+    syncToolbarFromState();
     render();
   }
 
@@ -1203,23 +1385,30 @@
       syncToolbarFromState();
     }
 
+    const boardRows = Number(document.getElementById("select-board-rows")?.value || 30);
+
     const defaults = {
-      pico:           { gx: g.gx + 3,  gy: g.gy - 10, rot: 90, props: { model: "Raspberry Pi Pico" } },
-      breadboard:     { gx: g.gx + 5,  gy: g.gy - 15, rot: 90, props: {} },
-      led:            { gx: g.gx,      gy: g.gy,      rot: 0,  props: { color: "red", span: 1, showPolarity: true } },
-      resistor:       { gx: g.gx - 2,  gy: g.gy,      rot: 0,  props: { value: "220", span: 4, showLabel: true } },
-      tact_switch:    { gx: g.gx - 1,  gy: g.gy - 1,  rot: 90, props: { btnColor: "black" } },
-      toggle_switch:  { gx: g.gx - 1,  gy: g.gy,      rot: 0,  props: { lever: "left" } },
-      potentiometer:  { gx: g.gx - 1,  gy: g.gy,      rot: 0,  props: { label: "B5K", knobPos: 50, step: 1 } },
-      buzzer:         { gx: g.gx - 1,  gy: g.gy,      rot: 0,  props: { buzzerType: "passive", span: 3 } },
-      matrix_1088bs:  { gx: g.gx - 4,  gy: g.gy + 2,  rot: 0,  props: { pattern: "two" } },
-      matrix_max7219: { gx: g.gx - 3,  gy: g.gy + 2,  rot: 0,  props: { pattern: "smile" } },
-      seven_seg:      { gx: g.gx - 2,  gy: g.gy + 1,  rot: 0,  props: { digit: "8", dp: false } }
+      pico:              { gx: g.gx + 3,  gy: g.gy - 10, rot: 90, props: { model: "Raspberry Pi Pico" } },
+      breadboard:        { gx: g.gx + 5,  gy: g.gy - 15, rot: 90, props: { rows: boardRows, cutBottom: boardRows < 60 } },
+      led:               { gx: g.gx,      gy: g.gy,      rot: 0,  props: { color: "red", span: 1, showPolarity: true } },
+      resistor:          { gx: g.gx - 2,  gy: g.gy,      rot: 0,  props: { value: "220", span: 4, showLabel: true } },
+      tact_switch:       { gx: g.gx - 1,  gy: g.gy - 1,  rot: 90, props: { btnColor: "black" } },
+      toggle_switch:     { gx: g.gx - 1,  gy: g.gy,      rot: 0,  props: { lever: "left" } },
+      potentiometer:     { gx: g.gx - 1,  gy: g.gy,      rot: 0,  props: { label: "B5K", knobPos: 50, step: 1 } },
+      buzzer:            { gx: g.gx - 1,  gy: g.gy,      rot: 0,  props: { buzzerType: "passive", span: 3 } },
+      matrix_1088bs:     { gx: g.gx - 4,  gy: g.gy + 2,  rot: 0,  props: { pattern: "two" } },
+      matrix_max7219:    { gx: g.gx - 3,  gy: g.gy + 2,  rot: 0,  props: { pattern: "smile" } },
+      seven_seg:         { gx: g.gx - 2,  gy: g.gy + 1,  rot: 0,  props: { digit: "8", dp: false } },
+      rfid_rc522:        { gx: g.gx - 3,  gy: g.gy + 4,  rot: 0,  props: {} },
+      servo_sg90:        { gx: g.gx - 1,  gy: g.gy + 3,  rot: 0,  props: { angle: 90 } },
+      dht11:             { gx: g.gx - 1,  gy: g.gy + 2,  rot: 0,  props: { pinOrder: "vcc_out_gnd" } },
+      fingerprint_as608: { gx: g.gx - 2,  gy: g.gy + 4,  rot: 0,  props: { pinCount: 4 } }
     };
     const d = defaults[type];
     const part = { id: uid(type), type, gx: d.gx, gy: d.gy, rot: d.rot, flipX: false, props: { ...d.props } };
     state.parts.push(part);
     selected = { kind: "part", id: part.id };
+    syncToolbarFromState();
     render();
   }
 
@@ -1229,7 +1418,6 @@
     const wPos = clientToWorld(e.clientX, e.clientY);
     const gPos = worldToGrid(wPos.x, wPos.y);
 
-    // 注釈配置モード：クリックした箇所を矢印先端にして吹き出しを作成
     if (mode === "annotate") {
       saveHistory();
       const snapX = Math.round(wPos.x / 10) * 10;
@@ -1250,7 +1438,6 @@
       state.annotations.push(newAnn);
       selected = { kind: "annotation", id: newAnn.id };
       setMode("select");
-      // すぐに文字を書き換えられるよう右パネルの入力欄にフォーカス
       const ta = document.getElementById("prop-ann-text");
       if (ta) {
         ta.focus();
@@ -1259,7 +1446,6 @@
       return;
     }
 
-    // 配線モード
     if (mode === "wire") {
       if (!wireDraft) {
         wireDraft = { start: gPos, hover: gPos };
@@ -1282,7 +1468,6 @@
       return;
     }
 
-    // 吹き出し矢印先端のドラッグ
     const annAnchorEl = e.target.closest("[data-ann-anchor-id]");
     if (annAnchorEl) {
       const ann = state.annotations.find(a => a.id === annAnchorEl.dataset.annAnchorId);
@@ -1293,7 +1478,6 @@
       return;
     }
 
-    // 吹き出し本体の選択＆ドラッグ
     const annBoxEl = e.target.closest("[data-ann-box-id]");
     if (annBoxEl) {
       const ann = state.annotations.find(a => a.id === annBoxEl.dataset.annBoxId);
@@ -1312,7 +1496,6 @@
       return;
     }
 
-    // ワイヤー中点「＋」クリック
     const midEl = e.target.closest(".wire-mid-handle");
     if (midEl) {
       const wire = state.wires.find(w => w.id === midEl.dataset.wireId);
@@ -1329,7 +1512,6 @@
       return;
     }
 
-    // ワイヤー頂点ドラッグ
     const handleEl = e.target.closest(".wire-handle");
     if (handleEl) {
       const wire = state.wires.find(w => w.id === handleEl.dataset.wireId);
@@ -1341,7 +1523,6 @@
       return;
     }
 
-    // ワイヤー選択
     const wireEl = e.target.closest("[data-wire-id]");
     if (wireEl) {
       selected = { kind: "wire", id: wireEl.dataset.wireId };
@@ -1349,7 +1530,6 @@
       return;
     }
 
-    // 部品選択＆ドラッグ
     const partEl = e.target.closest("[data-part-id]");
     if (partEl) {
       const part = state.parts.find(p => p.id === partEl.dataset.partId);
@@ -1368,7 +1548,6 @@
       }
     }
 
-    // 空白ドラッグでパン移動
     selected = null;
     dragState = {
       kind: "pan",
@@ -1449,11 +1628,10 @@
 
   window.addEventListener("mouseup", () => {
     if (dragState?.kind === "pan") svg.classList.remove("grabbing");
-    if (dragState?.kind === "ann-anchor") renderPropertyPanel(); // 指し先移動後にピン自動入力ボタンを更新
+    if (dragState?.kind === "ann-anchor") renderPropertyPanel();
     dragState = null;
   });
 
-  // ダブルクリック：ワイヤー途中頂点削除 / 吹き出し文字編集フォーカス
   svg.addEventListener("dblclick", (e) => {
     const annBoxEl = e.target.closest("[data-ann-box-id]");
     if (annBoxEl) {
@@ -1481,7 +1659,7 @@
   svg.addEventListener("wheel", (e) => {
     e.preventDefault();
     const factor = e.deltaY < 0 ? 1.1 : 0.9;
-    const nextScale = Math.min(2.5, Math.max(0.4, view.scale * factor));
+    const nextScale = Math.min(2.5, Math.max(0.35, view.scale * factor));
     const rect = svg.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -1532,7 +1710,7 @@
         }
         saveHistory();
         state = {
-          parts: parsed.parts.map(p => ({ ...p, flipX: !!p.flipX })),
+          parts: parsed.parts.map(p => ({ ...p, flipX: !!p.flipX, props: p.props || {} })),
           wires: parsed.wires,
           annotations: Array.isArray(parsed.annotations) ? parsed.annotations : [],
           settings: {
@@ -1547,28 +1725,52 @@
         render();
         fitToView();
       } catch (err) {
-        alert("JSONファイルの読み込みに失敗しました: " + err.message);
+        showToast("JSONの読み込みに失敗しました: " + err.message, 4000);
       }
     };
     reader.readAsText(file);
   }
 
-  // 自動トリミング＆高解像度PNG書き出し
+  // 自動トリミング＆上下分割対応・高解像度PNG書き出し
   function exportPNG() {
     const exportRoot = document.getElementById("export-root");
     const bbox = exportRoot.getBBox();
     if (bbox.width === 0 || bbox.height === 0) {
-      alert("書き出す部品がありません。");
+      showToast("書き出す部品がありません。");
       return;
     }
 
     const pad = 28;
-    const vx = bbox.x - pad;
-    const vy = bbox.y - pad;
-    const vw = bbox.width + pad * 2;
-    const vh = bbox.height + pad * 2;
-    const bg = document.getElementById("select-export-bg").value;
+    const rangeMode = document.getElementById("select-export-range").value;
+    let vx = bbox.x - pad;
+    let vy = bbox.y - pad;
+    let vw = bbox.width + pad * 2;
+    let vh = bbox.height + pad * 2;
+    let fileSuffix = "";
 
+    // 縦置きブレッドボードがある場合、上側(1〜30行) / 下側(25行〜) のスライド向け切り出しに対応
+    const bb = getPrimaryBreadboard();
+    if (bb && (((bb.rot || 0) % 360 + 360) % 360) === 90 && rangeMode !== "all") {
+      if (rangeMode === "top") {
+        const bottomLimit = (bb.gy + 30.2) * GRID;
+        const clampedBottom = Math.min(vy + vh, bottomLimit);
+        if (clampedBottom > vy + 40) {
+          vh = clampedBottom - vy;
+          fileSuffix = "-top";
+        }
+      } else if (rangeMode === "bottom") {
+        const topLimit = (bb.gy + 23.2) * GRID;
+        const clampedTop = Math.max(vy, topLimit);
+        const origBottom = vy + vh;
+        if (origBottom > clampedTop + 40) {
+          vy = clampedTop;
+          vh = origBottom - clampedTop;
+          fileSuffix = "-bottom";
+        }
+      }
+    }
+
+    const bg = document.getElementById("select-export-bg").value;
     const clone = exportRoot.cloneNode(true);
     const bgRect = bg !== "transparent"
       ? `<rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="${bg}" />`
@@ -1600,7 +1802,7 @@
 
       const a = document.createElement("a");
       a.href = canvas.toDataURL("image/png");
-      a.download = "pico-wiring-diagram.png";
+      a.download = `pico-wiring-diagram${fileSuffix}.png`;
       a.click();
     };
     img.src = url;
@@ -1611,6 +1813,15 @@
     document.getElementById("toggle-continuity").checked = state.settings.showContinuity;
     document.getElementById("toggle-pico-transparent").checked = state.settings.transparentPico;
     document.getElementById("toggle-lock-boards").checked = state.settings.lockBoards;
+
+    const bb = getPrimaryBreadboard();
+    const rowsSelect = document.getElementById("select-board-rows");
+    if (bb && rowsSelect) {
+      const rows = String(bb.props?.rows || 30);
+      if (Array.from(rowsSelect.options).some(o => o.value === rows)) {
+        rowsSelect.value = rows;
+      }
+    }
   }
 
   // ツールバー・イベント登録
@@ -1625,6 +1836,10 @@
   document.getElementById("palette-annotate-btn").addEventListener("click", () => setMode("annotate"));
   document.getElementById("btn-save-json").addEventListener("click", exportJSON);
   document.getElementById("btn-export-png").addEventListener("click", exportPNG);
+
+  document.getElementById("select-board-rows").addEventListener("change", (e) => {
+    setBoardRows(Number(e.target.value));
+  });
 
   const fileInput = document.getElementById("file-json-input");
   document.getElementById("btn-load-json").addEventListener("click", () => fileInput.click());
@@ -1666,7 +1881,7 @@
     renderCanvas();
   });
   document.getElementById("btn-zoom-out").addEventListener("click", () => {
-    view.scale = Math.max(0.4, view.scale / 1.15);
+    view.scale = Math.max(0.35, view.scale / 1.15);
     renderCanvas();
   });
   document.getElementById("btn-zoom-reset").addEventListener("click", fitToView);

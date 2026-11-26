@@ -194,14 +194,22 @@ window.PARTS_CATALOG = (() => {
     "9": ["a","b","c","d","f","g"]
   };
 
-  // ブレッドボード導通グループ定義
-  function getBreadboardGroups(part) {
-    const groups = [];
+  // ブレッドボードの行数から電源レール穴のX座標一覧（5穴ブロック単位）を計算
+  function getBreadboardRailXs(rows) {
     const railXs = [];
-    for (let block = 0; block < 5; block++) {
+    for (let block = 0; block < 10; block++) {
       const start = 1 + block * 6;
+      if (start + 4 > rows - 1) break;
       for (let i = 0; i < 5; i++) railXs.push(start + i);
     }
+    return railXs;
+  }
+
+  // ブレッドボード導通グループ定義（30〜63行の可変行数に対応）
+  function getBreadboardGroups(part) {
+    const rows = Math.max(20, Math.min(63, Number(part.props?.rows || 30)));
+    const groups = [];
+    const railXs = getBreadboardRailXs(rows);
 
     const railConfigs = [
       { id: "top-minus", gy: -3, kind: "minus" },
@@ -210,15 +218,19 @@ window.PARTS_CATALOG = (() => {
       { id: "bot-minus", gy: 14, kind: "minus" }
     ];
 
-    for (const rc of railConfigs) {
-      const cells = railXs.map(lx => {
-        const r = transformGrid(lx, rc.gy, part.rot, false);
-        return { gx: part.gx + r.gx, gy: part.gy + r.gy, lx, ly: rc.gy };
-      });
-      groups.push({ id: `${part.id}:${rc.id}`, kind: rc.kind, isRail: true, cells, lx1: 1, ly1: rc.gy, lx2: 29, ly2: rc.gy });
+    if (railXs.length > 0) {
+      const firstX = railXs[0];
+      const lastX = railXs[railXs.length - 1];
+      for (const rc of railConfigs) {
+        const cells = railXs.map(lx => {
+          const r = transformGrid(lx, rc.gy, part.rot, false);
+          return { gx: part.gx + r.gx, gy: part.gy + r.gy, lx, ly: rc.gy };
+        });
+        groups.push({ id: `${part.id}:${rc.id}`, kind: rc.kind, isRail: true, cells, lx1: firstX, ly1: rc.gy, lx2: lastX, ly2: rc.gy });
+      }
     }
 
-    for (let col = 0; col < 30; col++) {
+    for (let col = 0; col < rows; col++) {
       const topCells = [0, 1, 2, 3, 4].map(ly => {
         const r = transformGrid(col, ly, part.rot, false);
         return { gx: part.gx + r.gx, gy: part.gy + r.gy, lx: col, ly };
@@ -299,6 +311,52 @@ window.PARTS_CATALOG = (() => {
         { name: "SCK",   kind: "gpio", gx: 3, gy: 0 },
         { name: "LATCH", kind: "gpio", gx: 4, gy: 0 }
       ];
+    } else if (part.type === "rfid_rc522") {
+      locals = [
+        { name: "SDA",  kind: "gpio", gx: 0, gy: 0 },
+        { name: "SCK",  kind: "gpio", gx: 1, gy: 0 },
+        { name: "MOSI", kind: "gpio", gx: 2, gy: 0 },
+        { name: "MISO", kind: "gpio", gx: 3, gy: 0 },
+        { name: "IRQ",  kind: "sys",  gx: 4, gy: 0 },
+        { name: "GND",  kind: "gnd",  gx: 5, gy: 0 },
+        { name: "RST",  kind: "gpio", gx: 6, gy: 0 },
+        { name: "3.3V", kind: "pwr",  gx: 7, gy: 0 }
+      ];
+    } else if (part.type === "servo_sg90") {
+      locals = [
+        { name: "GND(茶)", kind: "gnd",  gx: 0, gy: 0 },
+        { name: "5V(赤)",  kind: "pwr",  gx: 1, gy: 0 },
+        { name: "PWM(橙)", kind: "gpio", gx: 2, gy: 0 }
+      ];
+    } else if (part.type === "dht11") {
+      const order = part.props?.pinOrder || "vcc_out_gnd";
+      if (order === "out_vcc_gnd") {
+        locals = [
+          { name: "OUT",    kind: "gpio", gx: 0, gy: 0 },
+          { name: "VCC(+)", kind: "pwr",  gx: 1, gy: 0 },
+          { name: "GND(-)", kind: "gnd",  gx: 2, gy: 0 }
+        ];
+      } else {
+        locals = [
+          { name: "VCC(+)", kind: "pwr",  gx: 0, gy: 0 },
+          { name: "OUT",    kind: "gpio", gx: 1, gy: 0 },
+          { name: "GND(-)", kind: "gnd",  gx: 2, gy: 0 }
+        ];
+      }
+    } else if (part.type === "fingerprint_as608") {
+      const pinCount = Number(part.props?.pinCount || 4);
+      locals = [
+        { name: "3.3V", kind: "pwr",  gx: 0, gy: 0 },
+        { name: "TX",   kind: "gpio", gx: 1, gy: 0 },
+        { name: "RX",   kind: "gpio", gx: 2, gy: 0 },
+        { name: "GND",  kind: "gnd",  gx: 3, gy: 0 }
+      ];
+      if (pinCount === 6) {
+        locals.push(
+          { name: "TCH", kind: "gpio", gx: 4, gy: 0 },
+          { name: "VT",  kind: "pwr",  gx: 5, gy: 0 }
+        );
+      }
     }
 
     return locals.map(p => {
@@ -309,19 +367,20 @@ window.PARTS_CATALOG = (() => {
 
   // ==================== 各部品のSVG描画 ====================
 
+  // ブレッドボード（30〜63行の可変行数＋下端省略波線対応）
   function renderBreadboard(part, isSelected) {
     const G = GRID;
     const rot = part.rot || 0;
+    const rows = Math.max(20, Math.min(63, Number(part.props?.rows || 30)));
+    const showCut = part.props?.cutBottom !== undefined ? !!part.props.cutBottom : (rows < 60);
+
     const x0 = -1.2 * G;
     const y0 = -4.0 * G;
-    const width = 31.4 * G;
+    const width = (rows + 1.4) * G;
     const height = 19.0 * G;
+    const endX = x0 + width;
 
-    const railXs = [];
-    for (let block = 0; block < 5; block++) {
-      const start = 1 + block * 6;
-      for (let i = 0; i < 5; i++) railXs.push(start + i);
-    }
+    const railXs = getBreadboardRailXs(rows);
 
     let holes = "";
     for (const ry of [-3, -2, 13, 14]) {
@@ -329,14 +388,14 @@ window.PARTS_CATALOG = (() => {
         holes += `<rect x="${rx * G - 3.5}" y="${ry * G - 3.5}" width="7" height="7" rx="1.2" fill="#334155" />`;
       }
     }
-    for (let col = 0; col < 30; col++) {
+    for (let col = 0; col < rows; col++) {
       for (const ly of [0, 1, 2, 3, 4, 7, 8, 9, 10, 11]) {
         holes += `<rect x="${col * G - 3.5}" y="${ly * G - 3.5}" width="7" height="7" rx="1.2" fill="#334155" />`;
       }
     }
 
     let colNums = "";
-    for (let col = 0; col < 30; col++) {
+    for (let col = 0; col < rows; col++) {
       const num = col + 1;
       const bold = (num === 1 || num % 5 === 0) ? "700" : "500";
       const fill = (num === 1 || num % 5 === 0) ? "#1e293b" : "#94a3b8";
@@ -355,7 +414,7 @@ window.PARTS_CATALOG = (() => {
     for (const [ch, ly] of rowLabels) {
       const y = ly * G;
       const x1 = -0.75 * G;
-      const x2 = 29.75 * G;
+      const x2 = (rows - 0.25) * G;
       rowTexts += `<text x="${x1}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="700" fill="#475569" ${unrotateAttr(x1, y, rot)}>${ch}</text>`;
       rowTexts += `<text x="${x2}" y="${y}" text-anchor="middle" dominant-baseline="central" font-size="10" font-weight="700" fill="#475569" ${unrotateAttr(x2, y, rot)}>${ch}</text>`;
     }
@@ -373,18 +432,47 @@ window.PARTS_CATALOG = (() => {
 
     const stroke = isSelected ? "#2563eb" : "#cbd5e1";
     const strokeW = isSelected ? 2.5 : 1.5;
+    const lineEnd = (rows - 0.3) * G;
+
+    // ボード外枠（下端省略表示ONのときは右端＝縦置き時の下端をギザギザカット線で描画）
+    let bodyShape = "";
+    let cutHintSvg = "";
+    if (showCut) {
+      const zigSteps = 12;
+      const stepH = height / zigSteps;
+      let zig = "";
+      for (let i = 1; i <= zigSteps; i++) {
+        const py = y0 + stepH * i;
+        const px = (i % 2 === 1) ? endX - 5 : endX;
+        zig += ` L ${px},${py}`;
+      }
+      bodyShape = `
+        <path d="M ${x0 + 8},${y0} L ${endX},${y0}${zig} L ${x0 + 8},${y0 + height} Q ${x0},${y0 + height} ${x0},${y0 + height - 8} L ${x0},${y0 + 8} Q ${x0},${y0} ${x0 + 8},${y0} Z"
+              fill="#ffffff" stroke="${stroke}" stroke-width="${strokeW}" stroke-linejoin="round" />
+      `;
+      const cx = endX + 12;
+      const cy = 5.5 * G;
+      cutHintSvg = `
+        <g ${unrotateAttr(cx, cy, rot)}>
+          <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" font-size="9.5" font-weight="700" fill="#94a3b8">…下に続く (${rows}行まで表示)</text>
+        </g>
+      `;
+    } else {
+      bodyShape = `<rect x="${x0}" y="${y0}" width="${width}" height="${height}" rx="8" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeW}" />`;
+    }
 
     return `
-      <rect x="${x0}" y="${y0}" width="${width}" height="${height}" rx="8" fill="#ffffff" stroke="${stroke}" stroke-width="${strokeW}" />
-      <rect x="${x0 + 4}" y="${5.1 * G}" width="${width - 8}" height="${0.8 * G}" rx="3" fill="#e2e8f0" />
-      <line x1="${0.3 * G}" y1="${-3.55 * G}" x2="${29.7 * G}" y2="${-3.55 * G}" stroke="#2563eb" stroke-width="2" />
-      <line x1="${0.3 * G}" y1="${-1.45 * G}" x2="${29.7 * G}" y2="${-1.45 * G}" stroke="#ef4444" stroke-width="2" />
-      <line x1="${0.3 * G}" y1="${12.45 * G}" x2="${29.7 * G}" y2="${12.45 * G}" stroke="#ef4444" stroke-width="2" />
-      <line x1="${0.3 * G}" y1="${14.55 * G}" x2="${29.7 * G}" y2="${14.55 * G}" stroke="#2563eb" stroke-width="2" />
+      ${bodyShape}
+      <rect x="${x0 + 4}" y="${5.1 * G}" width="${width - 10}" height="${0.8 * G}" rx="3" fill="#e2e8f0" />
+      <line x1="${0.3 * G}" y1="${-3.55 * G}" x2="${lineEnd}" y2="${-3.55 * G}" stroke="#2563eb" stroke-width="2" />
+      <line x1="${0.3 * G}" y1="${-1.45 * G}" x2="${lineEnd}" y2="${-1.45 * G}" stroke="#ef4444" stroke-width="2" />
+      <line x1="${0.3 * G}" y1="${12.45 * G}" x2="${lineEnd}" y2="${12.45 * G}" stroke="#ef4444" stroke-width="2" />
+      <line x1="${0.3 * G}" y1="${14.55 * G}" x2="${lineEnd}" y2="${14.55 * G}" stroke="#2563eb" stroke-width="2" />
       ${signsSvg}
       ${colNums}
       ${rowTexts}
       ${holes}
+      ${cutHintSvg}
     `;
   }
 
@@ -720,7 +808,6 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
-  // 8x8 マトリクスLED（単体：「文字側」のみ表記）
   function renderMatrix1088BS(part, isSelected) {
     const G = GRID;
     const flip = !!part.flipX;
@@ -898,6 +985,267 @@ window.PARTS_CATALOG = (() => {
     `;
   }
 
+  // ==================== 新規追加4部品 ====================
+
+  // 1. RFID RC522（青基板・アンテナコイル・8ピン・3.3V専用表示）
+  function renderRfidRc522(part, isSelected) {
+    const G = GRID;
+    const flip = !!part.flipX;
+    const pcbX = -0.6 * G;
+    const pcbY = -10.4 * G;
+    const pcbW = 8.2 * G;
+    const pcbH = 10.0 * G;
+    const cx = 3.5 * G;
+
+    const pins = [
+      { gx: 0, name: "SDA",  color: "#16a34a" },
+      { gx: 1, name: "SCK",  color: "#f97316" },
+      { gx: 2, name: "MOSI", color: "#2563eb" },
+      { gx: 3, name: "MISO", color: "#9333ea" },
+      { gx: 4, name: "IRQ",  color: "#64748b" },
+      { gx: 5, name: "GND",  color: "#1e293b" },
+      { gx: 6, name: "RST",  color: "#ca8a04" },
+      { gx: 7, name: "3.3V", color: "#dc2626" }
+    ];
+
+    let pinsSvg = "";
+    for (const p of pins) {
+      const px = p.gx * G;
+      pinsSvg += `
+        <line x1="${px}" y1="0" x2="${px}" y2="-9" stroke="#94a3b8" stroke-width="3" />
+        <circle cx="${px}" cy="0" r="3.8" fill="${p.color}" stroke="#ffffff" stroke-width="1.2" />
+        <g ${unflipAttr(px, -19, flip)}>
+          <rect x="${px - 9.2}" y="-27" width="18.4" height="16" rx="2.5" fill="${p.color}" stroke="#ffffff" stroke-width="0.7" />
+          <text x="${px}" y="-19" text-anchor="middle" dominant-baseline="central" font-size="6.4" font-weight="800" fill="#ffffff">${p.name}</text>
+        </g>
+      `;
+    }
+
+    const selRing = isSelected
+      ? `<rect x="${pcbX - 6}" y="${pcbY - 6}" width="${pcbW + 12}" height="${pcbH + 18}" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
+      : "";
+
+    return `
+      ${selRing}
+      <!-- 青基板本体 -->
+      <rect x="${pcbX}" y="${pcbY}" width="${pcbW}" height="${pcbH}" rx="6" fill="#1d4ed8" stroke="#1e3a8a" stroke-width="2" />
+      <!-- 四隅の取付穴 -->
+      <circle cx="${pcbX + 9}" cy="${pcbY + 9}" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+      <circle cx="${pcbX + pcbW - 9}" cy="${pcbY + 9}" r="3.5" fill="#f8fafc" stroke="#94a3b8" stroke-width="1" />
+      <!-- アンテナコイル枠 -->
+      <rect x="${pcbX + 12}" y="${pcbY + 14}" width="${pcbW - 24}" height="82" rx="6" fill="none" stroke="#93c5fd" stroke-width="1.8" />
+      <rect x="${pcbX + 18}" y="${pcbY + 20}" width="${pcbW - 36}" height="70" rx="4" fill="none" stroke="#bfdbfe" stroke-width="1.3" />
+      <rect x="${pcbX + 24}" y="${pcbY + 26}" width="${pcbW - 48}" height="58" rx="3" fill="none" stroke="#dbeafe" stroke-width="1" />
+      <!-- RFID 電波シンボル -->
+      <g ${unflipAttr(cx, pcbY + 55, flip)}>
+        <circle cx="${cx}" cy="${pcbY + 62}" r="3.5" fill="#ffffff" />
+        <path d="M ${cx - 10},${pcbY + 55} A 14,14 0 0 1 ${cx + 10},${pcbY + 55}" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" />
+        <path d="M ${cx - 17},${pcbY + 48} A 23,23 0 0 1 ${cx + 17},${pcbY + 48}" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" />
+        <path d="M ${cx - 24},${pcbY + 41} A 32,32 0 0 1 ${cx + 24},${pcbY + 41}" fill="none" stroke="#bfdbfe" stroke-width="2" stroke-linecap="round" />
+      </g>
+      <!-- MFRC522 ICチップ -->
+      <rect x="${cx - 14}" y="${pcbY + 106}" width="28" height="28" rx="2" fill="#0f172a" stroke="#475569" stroke-width="1.2" />
+      <!-- ラベル & 3.3V注意 -->
+      <g ${unflipAttr(cx, pcbY + 150, flip)}>
+        <text x="${cx}" y="${pcbY + 146}" text-anchor="middle" font-size="10.5" font-weight="800" fill="#ffffff">RFID-RC522</text>
+        <rect x="${cx - 34}" y="${pcbY + 152}" width="68" height="14" rx="3" fill="#fef2f2" stroke="#dc2626" stroke-width="1" />
+        <text x="${cx}" y="${pcbY + 162}" text-anchor="middle" font-size="8" font-weight="800" fill="#b91c1c">※3.3V専用</text>
+      </g>
+      ${pinsSvg}
+    `;
+  }
+
+  // 2. サーボモーター SG90（茶GND / 赤5V / 橙PWM + 可動ホーン角度）
+  function renderServoSg90(part, isSelected) {
+    const G = GRID;
+    const flip = !!part.flipX;
+    const angle = Number(part.props?.angle ?? 90);
+    const hornRot = angle - 90; // 0°→-90°, 90°→0°(上), 180°→+90°
+    const cx = G;
+
+    const pins = [
+      { gx: 0, name: "GND", wire: "#78350f", badge: "#1e293b" },
+      { gx: 1, name: "5V",  wire: "#dc2626", badge: "#dc2626" },
+      { gx: 2, name: "PWM", wire: "#f97316", badge: "#f97316" }
+    ];
+
+    let wiresSvg = "";
+    for (const p of pins) {
+      const px = p.gx * G;
+      wiresSvg += `
+        <path d="M ${px},0 L ${px},-18 C ${px},-26 ${cx + (p.gx - 1) * 5},-28 ${cx + (p.gx - 1) * 5},-38"
+              fill="none" stroke="${p.wire}" stroke-width="3.6" stroke-linecap="round" />
+        <circle cx="${px}" cy="0" r="3.8" fill="${p.wire}" stroke="#ffffff" stroke-width="1.2" />
+        <g ${unflipAttr(px, -11, flip)}>
+          <rect x="${px - 9.5}" y="-17" width="19" height="11" rx="2.5" fill="${p.badge}" />
+          <text x="${px}" y="-11.5" text-anchor="middle" dominant-baseline="central" font-size="6.8" font-weight="800" fill="#ffffff">${p.name}</text>
+        </g>
+      `;
+    }
+
+    const selRing = isSelected
+      ? `<rect x="${cx - 46}" y="-128" width="92" height="138" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
+      : "";
+
+    return `
+      <rect x="${cx - 44}" y="-124" width="88" height="130" fill="transparent" />
+      ${selRing}
+      <!-- 3本リード線（茶・赤・橙） -->
+      ${wiresSvg}
+      <!-- コネクタハウジング -->
+      <rect x="-7" y="-6" width="${2 * G + 14}" height="8" rx="2" fill="#1e293b" opacity="0.22" />
+      <!-- 取付フランジ（左右の耳） -->
+      <rect x="${cx - 40}" y="-86" width="80" height="10" rx="2.5" fill="#3b82f6" stroke="#1e40af" stroke-width="1.4" />
+      <circle cx="${cx - 33}" cy="-81" r="2.6" fill="#f8fafc" />
+      <circle cx="${cx + 33}" cy="-81" r="2.6" fill="#f8fafc" />
+      <!-- サーボ本体（半透明ブルー） -->
+      <rect x="${cx - 26}" y="-108" width="52" height="72" rx="5" fill="#2563eb" fill-opacity="0.9" stroke="#1e3a8a" stroke-width="1.8" />
+      <!-- 内部ギアのうっすら表現 -->
+      <rect x="${cx - 21}" y="-74" width="42" height="30" rx="3" fill="#1d4ed8" stroke="#60a5fa" stroke-width="0.8" />
+      <!-- ラベル -->
+      <g ${unflipAttr(cx, -59, flip)}>
+        <text x="${cx}" y="-63" text-anchor="middle" font-size="9.5" font-weight="800" fill="#ffffff">SG90</text>
+        <text x="${cx}" y="-51" text-anchor="middle" font-size="8" font-weight="700" fill="#bfdbfe">${angle}°</text>
+      </g>
+      <!-- ギア軸＆回転する白いサーボホーン -->
+      <circle cx="${cx}" cy="-94" r="14" fill="#60a5fa" stroke="#1e3a8a" stroke-width="1.4" />
+      <g transform="translate(${cx}, -94) rotate(${hornRot})">
+        <path d="M -5,3 L -3,-28 A 3,3 0 0 1 3,-28 L 5,3 Z" fill="#f8fafc" stroke="#64748b" stroke-width="1.4" />
+        <circle cx="0" cy="-21" r="1.4" fill="#64748b" />
+        <circle cx="0" cy="-14" r="1.4" fill="#64748b" />
+      </g>
+      <circle cx="${cx}" cy="-94" r="6" fill="#ffffff" stroke="#475569" stroke-width="1.4" />
+      <circle cx="${cx}" cy="-94" r="2.2" fill="#475569" />
+    `;
+  }
+
+  // 3. 温度湿度センサー WWZMDiB DHT11（3ピンモジュール・ピン順切替可）
+  function renderDht11(part, isSelected) {
+    const G = GRID;
+    const flip = !!part.flipX;
+    const order = part.props?.pinOrder || "vcc_out_gnd";
+    const cx = G;
+
+    const pins = order === "out_vcc_gnd"
+      ? [
+          { gx: 0, name: "OUT", color: "#2563eb" },
+          { gx: 1, name: "+",   color: "#dc2626" },
+          { gx: 2, name: "−",   color: "#1e293b" }
+        ]
+      : [
+          { gx: 0, name: "+",   color: "#dc2626" },
+          { gx: 1, name: "OUT", color: "#2563eb" },
+          { gx: 2, name: "−",   color: "#1e293b" }
+        ];
+
+    let pinsSvg = "";
+    for (const p of pins) {
+      const px = p.gx * G;
+      pinsSvg += `
+        <line x1="${px}" y1="0" x2="${px}" y2="-10" stroke="#94a3b8" stroke-width="3" />
+        <circle cx="${px}" cy="0" r="3.8" fill="${p.color}" stroke="#ffffff" stroke-width="1.2" />
+        <g ${unflipAttr(px, -17, flip)}>
+          <rect x="${px - 9.2}" y="-23" width="18.4" height="12" rx="2.5" fill="${p.color}" />
+          <text x="${px}" y="-17" text-anchor="middle" dominant-baseline="central" font-size="7.5" font-weight="800" fill="#ffffff">${p.name}</text>
+        </g>
+      `;
+    }
+
+    // 青い格子パターン（DHT11本体）
+    let gridSvg = "";
+    const bx = cx - 22;
+    const by = -98;
+    for (let r = 0; r < 4; r++) {
+      for (let c = 0; c < 4; c++) {
+        gridSvg += `<rect x="${bx + 6 + c * 9}" y="${by + 8 + r * 9}" width="6" height="6" rx="1" fill="#0369a1" />`;
+      }
+    }
+
+    const selRing = isSelected
+      ? `<rect x="${cx - 34}" y="-108" width="68" height="118" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
+      : "";
+
+    return `
+      ${selRing}
+      <!-- 下部モジュールPCB（青基板） -->
+      <rect x="${cx - 28}" y="-62" width="56" height="54" rx="5" fill="#1e3a8a" stroke="#0f172a" stroke-width="1.6" />
+      <!-- チップ抵抗・LEDの装飾 -->
+      <rect x="${cx - 22}" y="-37" width="8" height="4" rx="1" fill="#facc15" />
+      <circle cx="${cx + 18}" cy="-35" r="2.8" fill="#22c55e" stroke="#ffffff" stroke-width="0.6" />
+      <!-- 水色のDHT11センサー本体 -->
+      <rect x="${bx}" y="${by}" width="44" height="54" rx="4" fill="#38bdf8" stroke="#0284c7" stroke-width="1.8" />
+      ${gridSvg}
+      <!-- ラベル -->
+      <g ${unflipAttr(cx, -34, flip)}>
+        <text x="${cx}" y="-33" text-anchor="middle" font-size="9" font-weight="800" fill="#ffffff">DHT11</text>
+      </g>
+      ${pinsSvg}
+    `;
+  }
+
+  // 4. 指紋リーダー AS608（光学窓＋4本/6本UARTピン）
+  function renderFingerprintAs608(part, isSelected) {
+    const G = GRID;
+    const flip = !!part.flipX;
+    const pinCount = Number(part.props?.pinCount || 4);
+    const totalW = (pinCount - 1) * G;
+    const cx = totalW / 2;
+
+    const allPins = [
+      { gx: 0, name: "3.3V", color: "#dc2626", wire: "#dc2626" },
+      { gx: 1, name: "TX",   color: "#ca8a04", wire: "#eab308" },
+      { gx: 2, name: "RX",   color: "#2563eb", wire: "#94a3b8" },
+      { gx: 3, name: "GND",  color: "#1e293b", wire: "#1e293b" },
+      { gx: 4, name: "TCH",  color: "#0891b2", wire: "#06b6d4" },
+      { gx: 5, name: "VT",   color: "#16a34a", wire: "#22c55e" }
+    ].slice(0, pinCount);
+
+    let pinsSvg = "";
+    for (const p of allPins) {
+      const px = p.gx * G;
+      pinsSvg += `
+        <line x1="${px}" y1="0" x2="${px}" y2="-28" stroke="${p.wire}" stroke-width="3.2" stroke-linecap="round" />
+        <circle cx="${px}" cy="0" r="3.8" fill="${p.color}" stroke="#ffffff" stroke-width="1.2" />
+        <g ${unflipAttr(px, -15, flip)}>
+          <rect x="${px - 9.2}" y="-21" width="18.4" height="12" rx="2.5" fill="${p.color}" stroke="#ffffff" stroke-width="0.6" />
+          <text x="${px}" y="-15" text-anchor="middle" dominant-baseline="central" font-size="6.8" font-weight="800" fill="#ffffff">${p.name}</text>
+        </g>
+      `;
+    }
+
+    const boxW = Math.max(88, totalW + 26);
+    const boxH = 104;
+    const bx = cx - boxW / 2;
+    const by = -132;
+
+    const selRing = isSelected
+      ? `<rect x="${bx - 6}" y="${by - 6}" width="${boxW + 12}" height="${boxH + 44}" rx="10" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4 3" />`
+      : "";
+
+    return `
+      ${selRing}
+      <!-- リード線＆ピン -->
+      ${pinsSvg}
+      <!-- AS608 黒い光学ユニット本体 -->
+      <rect x="${bx}" y="${by}" width="${boxW}" height="${boxH}" rx="8" fill="#1e293b" stroke="#0f172a" stroke-width="2" />
+      <!-- 光学ガラス窓（緑バックライト） -->
+      <rect x="${cx - 26}" y="${by + 12}" width="52" height="56" rx="10" fill="#064e3b" stroke="#34d399" stroke-width="2" />
+      <rect x="${cx - 21}" y="${by + 17}" width="42" height="46" rx="7" fill="#10b981" fill-opacity="0.28" />
+      <!-- 指紋アイコン（同心アーチ） -->
+      <g fill="none" stroke="#6ee7b7" stroke-width="1.6" stroke-linecap="round">
+        <path d="M ${cx - 12},${by + 44} C ${cx - 12},${by + 27} ${cx + 12},${by + 27} ${cx + 12},${by + 44}" />
+        <path d="M ${cx - 8},${by + 48} C ${cx - 8},${by + 33} ${cx + 8},${by + 33} ${cx + 8},${by + 48}" />
+        <path d="M ${cx - 4},${by + 51} C ${cx - 4},${by + 39} ${cx + 4},${by + 39} ${cx + 4},${by + 51}" />
+        <line x1="${cx}" y1="${by + 43}" x2="${cx}" y2="${by + 53}" />
+      </g>
+      <!-- ラベル -->
+      <g ${unflipAttr(cx, by + 84, flip)}>
+        <text x="${cx}" y="${by + 82}" text-anchor="middle" font-size="10" font-weight="800" fill="#ffffff">AS608 指紋</text>
+        <text x="${cx}" y="${by + 95}" text-anchor="middle" font-size="7.5" font-weight="700" fill="#94a3b8">UART / 3.3V</text>
+      </g>
+    `;
+  }
+
   return {
     GRID,
     PICO_PINS,
@@ -922,6 +1270,10 @@ window.PARTS_CATALOG = (() => {
     renderBuzzer,
     renderMatrix1088BS,
     renderMatrixMax7219,
-    renderSevenSeg
+    renderSevenSeg,
+    renderRfidRc522,
+    renderServoSg90,
+    renderDht11,
+    renderFingerprintAs608
   };
 })();

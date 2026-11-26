@@ -32,6 +32,19 @@
     <div class="toolbar-divider"></div>
 
     <div class="toolbar-group">
+      <label class="control-label" title="配線が増えたら必要な行数だけ下に伸ばせます（既存部品はズレません）">
+        ボード:
+        <select id="select-board-rows">
+          <option value="30" selected>30行 (標準)</option>
+          <option value="36">36行 (+1段)</option>
+          <option value="42">42行 (+2段)</option>
+          <option value="48">48行 (+3段)</option>
+          <option value="54">54行 (+4段)</option>
+          <option value="60">60行 (フル)</option>
+          <option value="63">63行 (フル63)</option>
+        </select>
+      </label>
+
       <label class="control-label">
         Picoピン:
         <select id="select-pico-pins">
@@ -60,6 +73,11 @@
     <div class="toolbar-divider"></div>
 
     <div class="toolbar-group">
+      <select id="select-export-range" title="長いボードをスライド用に上下分割して書き出せます">
+        <option value="all" selected>範囲: 全体</option>
+        <option value="top">範囲: 上側 (1〜30行)</option>
+        <option value="bottom">範囲: 下側 (25行〜)</option>
+      </select>
       <select id="select-export-bg" title="書き出し背景色">
         <option value="transparent" selected>背景: 透過</option>
         <option value="#ffffff">背景: 白</option>
@@ -81,7 +99,7 @@
         </button>
         <button class="part-btn" data-add-part="breadboard">
           <span class="part-icon">⬜</span>
-          <span>ブレッドボード (30列)</span>
+          <span>ブレッドボード</span>
         </button>
       </div>
 
@@ -130,6 +148,26 @@
       </div>
 
       <div class="panel-section">
+        <h3>応用・センサー部品</h3>
+        <button class="part-btn" data-add-part="rfid_rc522">
+          <span class="part-icon">📡</span>
+          <span>RFID (RC522)</span>
+        </button>
+        <button class="part-btn" data-add-part="servo_sg90">
+          <span class="part-icon">🦾</span>
+          <span>サーボ (SG90)</span>
+        </button>
+        <button class="part-btn" data-add-part="dht11">
+          <span class="part-icon">🌡️</span>
+          <span>温湿度 (DHT11)</span>
+        </button>
+        <button class="part-btn" data-add-part="fingerprint_as608">
+          <span class="part-icon">👆</span>
+          <span>指紋リーダー (AS608)</span>
+        </button>
+      </div>
+
+      <div class="panel-section">
         <h3>配線・注釈</h3>
         <button class="part-btn" id="palette-wire-btn">
           <span class="part-icon">〰️</span>
@@ -147,7 +185,7 @@
           <li><b>R</b>：90°回転 / <b>F</b>：左右反転</li>
           <li><b>W</b>：配線 / <b>T</b>：吹き出し注釈</li>
           <li><b>Delete</b>：選択物を削除</li>
-          <li>吹き出しダブルクリック：文字編集</li>
+          <li><b>ボード長さ</b>で下へ延長・範囲指定書き出し可</li>
           <li>空白ドラッグ：移動 / ホイール：拡大縮小</li>
         </ul>
       </div>
